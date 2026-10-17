@@ -1,0 +1,28 @@
+# Profile layer of the Deep Connect bundle.
+#
+# One Host row that owns the relay socket, derives the frame key from the
+# signed-in account, indexes this machine's conversations, and answers both the
+# browser panel and the peer machines.
+#
+# `relayUrl` is the address of the relay you deployed (see ../relay/DEPLOY.md).
+# Leaving it empty keeps the plugin loaded but offline: the panel then explains
+# what to set, and nothing is transmitted anywhere.
+#
+# `secret` is optional. Left empty — the normal case — the frame key is derived
+# from the signed-in DeepSeek account, so every machine on that account agrees
+# without sharing anything. Set the SAME passphrase on every machine to key the
+# room from a passphrase instead, which is what you want if you would rather not
+# have the account identifier be the input.
+- insert:
+    - id: deep-connect
+      name: '@local/dsh-deep-connect'
+      config:
+        # State directory: identity, peer roster, remote conversation copies,
+        # and the offline outbox all live here.
+        root: !!js dshHomePath('deep-connect')
+        # Your relay. Set it here or later from the panel.
+        relayUrl: !!js process.env.DSH_DEEP_CONNECT_RELAY ?? ''
+        # Optional shared passphrase. Empty means "derive from the account".
+        secret: !!js process.env.DSH_DEEP_CONNECT_SECRET ?? ''
+        # How often the index is rebuilt and broadcast, in milliseconds.
+        indexIntervalMs: 15000

@@ -1,0 +1,35 @@
+{
+  "name": "@local/dsh-deep-connect",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deep Connect for the DeepSeek Harness Web UI: several DSH installs signed in to the same DeepSeek account meet through a cloud relay and share their conversations and task boards, with the relay seeing ciphertext only.",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.js",
+    "client.js",
+    "icon.svg",
+    "cordis.patch.yml",
+    "host/*.js",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}

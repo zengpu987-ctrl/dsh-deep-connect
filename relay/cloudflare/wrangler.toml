@@ -1,0 +1,49 @@
+# Deep Connect relay on Cloudflare Workers + Durable Objects.
+#
+# READ THIS BEFORE DEPLOYING FROM MAINLAND CHINA:
+# `*.workers.dev` does not resolve there (it is DNS-poisoned). A Worker published
+# only on its workers.dev hostname will be unreachable from the machines that
+# need it. You must attach a CUSTOM DOMAIN in your own Cloudflare zone and use
+# that hostname. Uncomment and fill in `routes` below.
+#
+# Free plan notes for a handful of desktops:
+#   - 100k requests/day and 13,000 GB-s/day of Durable Object duration.
+#   - WebSocket hibernation means an idle connected device is not billed for
+#     duration, which is most of the time.
+#   - One object per account (per channel), 1 GB of storage each on the free plan.
+#   - Workers Free allows 10 ms of CPU per request. Fan-out is I/O, so this is fine.
+
+name = "dsh-deep-connect-relay"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# A Durable Object class must be declared as a migration before first use, and
+# must keep the same `new_sqlite_classes` entry on later deploys.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayObject"]
+
+[[durable_objects.bindings]]
+name = "RELAY_OBJECT"
+class_name = "RelayObject"
+
+# --- Custom domain (strongly recommended; required from mainland China) -------
+# Replace with a hostname in a zone you control that is proxied by Cloudflare.
+#
+# routes = [
+#   { pattern = "connect.example.com", custom_domain = true }
+# ]
+#
+# A path route on an existing hostname also works:
+#
+# routes = [
+#   { pattern = "example.com/deep-connect/*", zone_name = "example.com" }
+# ]
+
+# --- Optional: keep the workers.dev hostname for testing -----------------------
+# Set false once a custom domain is attached. Leaving it on is harmless but it is
+# a hostname you cannot use from China.
+workers_dev = true
+
+[observability]
+enabled = true

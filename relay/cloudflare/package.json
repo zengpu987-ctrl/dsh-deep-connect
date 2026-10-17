@@ -1,0 +1,14 @@
+{
+  "name": "dsh-deep-connect-relay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Deep Connect relay on Cloudflare Workers + Durable Objects: routes opaque ciphertext between DSH installs sharing one DeepSeek account.",
+  "main": "worker.js",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
