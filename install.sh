@@ -149,7 +149,17 @@ else
 fi
 
 # ---------------------------------------------------------------- 2 + 3. manifest
+# The manifest edit needs a JSON-capable interpreter. A freshly set-up Mac may
+# have neither Node nor the DSH CLI on PATH, but almost always has python3, so
+# accept either instead of requiring the one this project happens to be written in.
+JSON_EDITOR=""
+for candidate in node python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1; then JSON_EDITOR="$candidate"; break; fi
+done
+[[ -n "$JSON_EDITOR" ]] || die "need node or python3 to update $PROFILE_DIR/package.json (install either, then re-run)"
+
 backup "$PROFILE_DIR/package.json"
+if [[ "$JSON_EDITOR" == "node" ]]; then
 node - "$PROFILE_DIR/package.json" "$PLUGIN_DIR" "$PKG_NAME" <<'NODE'
 const { readFileSync, writeFileSync } = require('node:fs');
 const [file, pluginDir, pkgName] = process.argv.slice(2);
@@ -175,6 +185,32 @@ if (changed) {
   console.log('  package.json already up to date');
 }
 NODE
+else
+"$JSON_EDITOR" - "$PROFILE_DIR/package.json" "$PLUGIN_DIR" "$PKG_NAME" <<'PYEOF'
+import json, sys
+path, plugin_dir, pkg_name = sys.argv[1:4]
+with open(path, encoding="utf-8") as fh:
+    pkg = json.load(fh)
+deps = pkg.setdefault("dependencies", {})
+wanted = "link:" + plugin_dir
+changed = False
+if deps.get(pkg_name) != wanted:
+    deps[pkg_name] = wanted
+    changed = True
+profile = pkg.setdefault("dsh", {}).setdefault("profile", {})
+bundles = profile.setdefault("bundles", [])
+if pkg_name not in bundles:
+    bundles.append(pkg_name)
+    changed = True
+if changed:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(pkg, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    print("  updated package.json (dependency + bundle)")
+else:
+    print("  package.json already up to date")
+PYEOF
+fi
 
 # ---------------------------------------------------------------- 4. Loader row
 backup "$PROFILE_DIR/cordis.patch.yml"

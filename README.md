@@ -40,17 +40,22 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@main/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.0/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
 
 ```bash
-# 镜像
+# 同上，但不带版本号（会取 main 上的最新安装器）
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@main/install.sh | bash
+# GitHub 镜像
 curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/zengpu987-ctrl/dsh-deep-connect/main/install.sh | bash
 # GitHub 直连（国内时通时断，带重试）
 curl -fsSL --retry 5 --retry-all-errors https://raw.githubusercontent.com/zengpu987-ctrl/dsh-deep-connect/main/install.sh | bash
 ```
+
+安装器只要求 `curl` + `tar` +（`node` 或 `python3` 之一，用来改 profile 的 JSON）。
+macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 脚本内部的仓库下载也按实测顺序做了多路回退（codeload → ghproxy.net → gh-proxy.com → github.com）。
 
@@ -62,7 +67,7 @@ curl -fsSL --retry 5 --retry-all-errors https://raw.githubusercontent.com/zengpu
 
 ```bash
 RELAY_URL=http://172.20.10.12:8790 \
-  curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@main/install.sh | bash
+  curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.0/install.sh | bash
 ```
 
 非默认 profile（如 `web`）加 `PROFILE=web`；DSH 装在别处加 `DSH_HOME=/path/to/.dsh`。

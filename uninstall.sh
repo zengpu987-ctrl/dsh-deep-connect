@@ -28,6 +28,14 @@ STAMP="$(date +%s)"
 
 if [[ -f "$PROFILE_DIR/package.json" ]]; then
   cp "$PROFILE_DIR/package.json" "$PROFILE_DIR/package.json.bak-dc-$STAMP"
+  # Same interpreter choice as install.sh: a machine may have neither node nor
+  # the DSH CLI on PATH, so accept python3 as well.
+  JSON_EDITOR=""
+  for candidate in node python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then JSON_EDITOR="$candidate"; break; fi
+  done
+  [[ -n "$JSON_EDITOR" ]] || { echo "need node or python3 to edit $PROFILE_DIR/package.json" >&2; exit 1; }
+  if [[ "$JSON_EDITOR" == "node" ]]; then
   node - "$PROFILE_DIR/package.json" "$PKG_NAME" <<'NODE'
 const { readFileSync, writeFileSync } = require('node:fs');
 const [file, pkgName] = process.argv.slice(2);
@@ -52,6 +60,29 @@ if (changed) {
   console.log('  package.json had nothing to remove');
 }
 NODE
+  else
+  "$JSON_EDITOR" - "$PROFILE_DIR/package.json" "$PKG_NAME" <<'PYEOF'
+import json, sys
+path, pkg_name = sys.argv[1:3]
+with open(path, encoding="utf-8") as fh:
+    pkg = json.load(fh)
+changed = False
+if pkg_name in pkg.get("dependencies", {}):
+    del pkg["dependencies"][pkg_name]
+    changed = True
+bundles = pkg.get("dsh", {}).get("profile", {}).get("bundles")
+if isinstance(bundles, list) and pkg_name in bundles:
+    pkg["dsh"]["profile"]["bundles"] = [name for name in bundles if name != pkg_name]
+    changed = True
+if changed:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(pkg, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    print("  removed the dependency and bundle entry from package.json")
+else:
+    print("  package.json had nothing to remove")
+PYEOF
+  fi
 fi
 
 if [[ -f "$PROFILE_DIR/cordis.patch.yml" ]] && grep -q "id: deep-connect" "$PROFILE_DIR/cordis.patch.yml"; then
