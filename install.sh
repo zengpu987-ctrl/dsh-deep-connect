@@ -53,10 +53,13 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 # China first and the direct route last.
 download_repo() {
   local dest="$1"
+  # Order is measured, not guessed: codeload and the two mirrors answered from
+  # mainland China; github.com/archive redirects and github.com git transport is
+  # blocked, so both are last.
   local urls=(
+    "https://codeload.github.com/$DC_OWNER/$DC_REPO/tar.gz/refs/heads/$DC_REF"
     "https://ghproxy.net/https://github.com/$DC_OWNER/$DC_REPO/archive/refs/heads/$DC_REF.tar.gz"
     "https://gh-proxy.com/https://github.com/$DC_OWNER/$DC_REPO/archive/refs/heads/$DC_REF.tar.gz"
-    "https://codeload.github.com/$DC_OWNER/$DC_REPO/tar.gz/refs/heads/$DC_REF"
     "https://github.com/$DC_OWNER/$DC_REPO/archive/refs/heads/$DC_REF.tar.gz"
   )
   local tmpdir
@@ -64,7 +67,8 @@ download_repo() {
   local tarball="$tmpdir/repo.tar.gz"
   for url in "${urls[@]}"; do
     say "  downloading ${url}"
-    if curl -fsSL --retry 2 --connect-timeout 15 --max-time 180 -o "$tarball" "$url" 2>/dev/null \
+    if curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 180 \
+        -o "$tarball" "$url" 2>/dev/null \
       && tar -tzf "$tarball" >/dev/null 2>&1; then
       tar -xzf "$tarball" -C "$tmpdir"
       local extracted

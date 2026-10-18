@@ -35,18 +35,24 @@
 
 ### 1. 在每台机器上装插件（一行命令）
 
-已经装好本仓库的机器上不需要这一步；**新机器**直接运行：
+已经装好本仓库的机器上不需要这一步；**新机器**直接运行。
+
+首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zengpu987-ctrl/dsh-deep-connect/main/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@main/install.sh | bash
 ```
 
-中国大陆直连 `raw.githubusercontent.com` 常常不通，用镜像版（任选其一）：
+备选（任选其一，都是同一个脚本）：
 
 ```bash
-curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zengpu987-ctrl/dsh-deep-connect/main/install.sh | bash
+# 镜像
 curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/zengpu987-ctrl/dsh-deep-connect/main/install.sh | bash
+# GitHub 直连（国内时通时断，带重试）
+curl -fsSL --retry 5 --retry-all-errors https://raw.githubusercontent.com/zengpu987-ctrl/dsh-deep-connect/main/install.sh | bash
 ```
+
+脚本内部的仓库下载也按实测顺序做了多路回退（codeload → ghproxy.net → gh-proxy.com → github.com）。
 
 脚本会：优先从镜像下载仓库到 `~/.dsh/plugins/dsh-deep-connect` → 链接进 DSH 的
 `desktop` profile → 写依赖、bundle 列表和 Loader 配置行。
@@ -56,7 +62,7 @@ curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/zengpu987-ctrl
 
 ```bash
 RELAY_URL=http://172.20.10.12:8790 \
-  curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zengpu987-ctrl/dsh-deep-connect/main/install.sh | bash
+  curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@main/install.sh | bash
 ```
 
 非默认 profile（如 `web`）加 `PROFILE=web`；DSH 装在别处加 `DSH_HOME=/path/to/.dsh`。
