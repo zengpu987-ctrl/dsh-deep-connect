@@ -40,7 +40,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.0/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -66,9 +66,12 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 想连中继地址一起写进去（这样面板里不用再填）：
 
 ```bash
-RELAY_URL=http://172.20.10.12:8790 \
-  curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.0/install.sh | bash
+# 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/install.sh \
+  | RELAY_URL=http://172.20.10.12:8790 bash
 ```
+
+等价写法：`export RELAY_URL=http://172.20.10.12:8790; curl ... | bash`。
 
 非默认 profile（如 `web`）加 `PROFILE=web`；DSH 装在别处加 `DSH_HOME=/path/to/.dsh`。
 
