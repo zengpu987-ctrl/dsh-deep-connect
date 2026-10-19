@@ -16,3 +16,7 @@ scratch/
 # Paper intermediates (final PDFs live at paper/*.pdf)
 paper/build/
 paper/.mpl/
+
+# Python bytecode
+__pycache__/
+*.pyc
