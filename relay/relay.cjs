@@ -244,8 +244,11 @@ function createRelay(options = {}) {
     const state = { buf: Buffer.alloc(0) };
     /** @type {object|undefined} */
     let device;
-    socket.on('error', () => socket.destroy());
-    socket.on('close', () => {
+    /** Remove this socket from the room exactly once. */
+    let detached = false;
+    const detach = () => {
+      if (detached) return;
+      detached = true;
       if (device === undefined) return;
       device.sockets.delete(socket);
       if (device.sockets.size === 0) {
@@ -260,6 +263,28 @@ function createRelay(options = {}) {
         setTimeout(() => {
           if (device.sockets.size === 0) broadcastPresence(channel);
         }, PRESENCE_GRACE_MS).unref?.();
+      }
+    };
+    socket.on('error', () => {
+      try {
+        socket.destroy();
+      } catch {
+        /* already gone */
+      }
+      detach();
+    });
+    socket.on('close', detach);
+    // A clean client shutdown sends FIN, which arrives as `end`. Node does not
+    // guarantee a following `close` for an upgraded socket, and a socket left in
+    // that half-open state used to keep the device "online" for ever: presence
+    // never updated and envelopes written to it were lost instead of queued.
+    // Treat `end` as departure, then finish the socket.
+    socket.on('end', () => {
+      detach();
+      try {
+        socket.end();
+      } catch {
+        /* write side already closed */
       }
     });
     const onFrames = (frames) => {
@@ -289,7 +314,15 @@ function createRelay(options = {}) {
           if (device !== undefined) device.sockets.delete(socket);
           device = deviceOf(channel, deviceId, String(msg.name ?? '').slice(0, 120));
           device.sockets.add(socket);
-          send(device, { type: 'welcome', deviceId: device.id, seq: device.seq, pending: device.mailbox.length });
+          // Deliver what arrived while this device was away. Without this, mail
+          // queued for an offline WebSocket client was never handed over: only
+          // the HTTP mailbox path drained, so a device that reconnected over
+          // the socket silently lost every update it missed. `splice` keeps the
+          // drain one-shot when several sockets register at once.
+          pruneMailbox(device);
+          const pending = device.mailbox.splice(0, device.mailbox.length);
+          send(device, { type: 'welcome', deviceId: device.id, seq: device.seq, pending: pending.length });
+          for (const envelope of pending) send(device, { type: 'message', envelope });
           broadcastPresence(channel);
           continue;
         }

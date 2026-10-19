@@ -163,7 +163,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/in
 
 | 部分 | 状态 |
 |---|---|
-| 中继 `relay/relay.cjs` | ✅ 端到端验证，28 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
+| 中继 `relay/relay.cjs` | ✅ 端到端验证，32 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱与重连排空、半开连接离场、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
 | Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，62 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、按需抓取、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
 | 浏览器半渲染 | ✅ 80 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
 | `deep-connect/relay/cloudflare` | ⚠️ **未运行过**（本机 `workers.dev` 被污染且没有账号）。按官方 API 写，首次 `wrangler deploy` 才是真测试 |
@@ -172,7 +172,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/in
 跑测试：
 
 ```bash
-node tools/relay-smoke.mjs        # 中继（28 项）
+node tools/relay-smoke.mjs        # 中继（32 项）
 node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（62 项）
 node tools/client-check.mjs       # 浏览器半（80 项）
 node ../tools/browser/check-connect.mjs   # 真机 GUI：面板真的渲染出来（需 GUI 在 19387 运行）
@@ -274,6 +274,27 @@ node tools/client-check.mjs
 ## 许可证
 
 [MIT](LICENSE)。
+
+---
+
+## 论文
+
+本仓库附带一篇 Nature 格式的技术论文（英文 18 页，另有中文版），记录设计、协议、密码学、威胁模型、实测数据与故障目录：
+
+- 英文：`paper/DeepConnect-Nature-EN.pdf`
+- 中文：`paper/DeepConnect-Nature-ZH.pdf`
+- 源文件：`paper/`（`src/` 为中英文正文与元数据，`measure.mjs` 采集数据，`make_figures.py` 出图，47 篇参考文献）
+
+复现：
+
+```bash
+node paper/measure.mjs          # 采集真实测量数据 -> paper/data/metrics.json
+python3 paper/make_figures.py   # 生成中英文图表 -> paper/assets/
+python3 paper/build.py          # 生成 HTML -> paper/build/
+node paper/render.mjs           # 渲染 PDF
+```
+
+论文中的每个数字都来自 `paper/data/metrics.json`，构建脚本在占位符缺失时会失败，因此正文与图表不会漂移。
 
 ---
 

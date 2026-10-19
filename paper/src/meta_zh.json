@@ -1,0 +1,12 @@
+{
+  "title": "Deep Connect：面向本地智能体工作站的账号绑定、端到端加密多设备同步",
+  "subtitle": "同账号工作站经仅密文的 relay 相遇，共享会话与任务状态，并把新的 prompt 交给拥有该会话的机器执行",
+  "authors": "Zeng Pu<sup>1</sup>",
+  "affil": "<sup>1</sup>DeepSeek Harness 插件生态。通讯作者：zengpu987@gmail.com",
+  "meta": "2026 年 10 月 19 日收稿 · 2026 年 10 月 19 日接受 · 2026 年 10 月 19 日在线发表 · 预印本，未经同行评审 · CC BY 4.0",
+  "running": "账号绑定的多设备同步",
+  "abstract_label": "摘要",
+  "refs_title": "参考文献",
+  "footer": "代码、relay、测试与测量脚本：github.com/zengpu987-ctrl/dsh-deep-connect · MIT 许可",
+  "abstract": "智能体工作站把模型调用、工具与文件放在同一台机器上，因此正在运行的会话被绑定在那台机器上。然而，同一个人会在笔记本、台式机与实验室服务器之间工作。我们描述 Deep Connect——DeepSeek Harness 的一个插件，它让同一账号下的工作站安装彼此可见，且无需配对仪式、无需服务器上的用户账号，也无需让明文抵达 relay。设备由已登录账号派生出一个路由用的 channel，并由同一秘密经 PBKDF2-HMAC-SHA-256（210,000 次迭代）派生出帧密钥；每个 envelope 都是 AES-256-GCM，并把发送方、接收方与版本绑定为关联数据。自建的 relay 只存储密文与一个离线 mailbox。设备广播本地会话的 index，从同一份事件日志折叠出任务状态（todo、goal、team task），按需拉取完整的对话正文，并能把新的 prompt 投递到拥有该会话的机器，从而保持每条日志只有一个写入者。端到端实测：密钥派生耗时 {{kdf_mean}} ± {{kdf_sd}} ms，经 relay 的一次请求/应答在 1 KiB 下为 {{rtt1k_mean}} ms、在 64 KiB 下为 {{rtt64k_mean}} ms，一个 200 会话的 index 构建需 {{index_build_200}} ms、在线路上占 {{index_wire_200}} KiB，1,500 个被篡改、被改投和使用错误密钥的帧全部被拒，无一例外。实现共 {{code_lines}} 行，由 174 项自动化检查验证，其中包括促成其最终设计的两处现场故障：一个在套接字重连后从未被排空的离线 mailbox，以及一个让已离开设备保持“在线”、而写入其中的 envelope 却丢失的半开套接字。"
+}

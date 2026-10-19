@@ -1,0 +1,472 @@
+[
+  {
+    "key": "v3",
+    "authors": "DeepSeek-AI",
+    "title": "DeepSeek-V3 technical report",
+    "venue": "arXiv",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2412.19437",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "r1",
+    "authors": "DeepSeek-AI",
+    "title": "DeepSeek-R1: incentivizing reasoning capability in LLMs via reinforcement learning",
+    "venue": "arXiv",
+    "year": 2025,
+    "url": "https://arxiv.org/abs/2501.12948",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "gpt4",
+    "authors": "OpenAI",
+    "title": "GPT-4 technical report",
+    "venue": "arXiv",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2303.08774",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "o1",
+    "authors": "OpenAI",
+    "title": "OpenAI o1 system card",
+    "venue": "arXiv",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2412.16720",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "react",
+    "authors": "Yao, S. et al.",
+    "title": "ReAct: synergizing reasoning and acting in language models",
+    "venue": "International Conference on Learning Representations",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2210.03629",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "toolformer",
+    "authors": "Schick, T. et al.",
+    "title": "Toolformer: language models can teach themselves to use tools",
+    "venue": "Advances in Neural Information Processing Systems 36",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2302.04761",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "sweagent",
+    "authors": "Yang, J. et al.",
+    "title": "SWE-agent: agent-computer interfaces enable automated software engineering",
+    "venue": "Advances in Neural Information Processing Systems 37",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2405.15793",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "autogen",
+    "authors": "Wu, Q. et al.",
+    "title": "AutoGen: enabling next-gen LLM applications via multi-agent conversation",
+    "venue": "arXiv",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2308.08155",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "codex",
+    "authors": "Chen, M. et al.",
+    "title": "Evaluating large language models trained on code",
+    "venue": "arXiv",
+    "year": 2021,
+    "url": "https://arxiv.org/abs/2107.03374",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "mcp",
+    "authors": "Anthropic",
+    "title": "Model Context Protocol specification",
+    "venue": "Model Context Protocol",
+    "year": 2024,
+    "url": "https://modelcontextprotocol.io",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "cot",
+    "authors": "Wei, J. et al.",
+    "title": "Chain-of-thought prompting elicits reasoning in large language models",
+    "venue": "Advances in Neural Information Processing Systems 35",
+    "year": 2022,
+    "url": "https://arxiv.org/abs/2201.11903",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "constitutional",
+    "authors": "Bai, Y. et al.",
+    "title": "Constitutional AI: harmlessness from AI feedback",
+    "venue": "arXiv",
+    "year": 2022,
+    "url": "https://arxiv.org/abs/2212.08073",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "dsh",
+    "authors": "DeepSeek",
+    "title": "DeepSeek Harness: an event-sourced agent workstation",
+    "venue": "GitHub",
+    "year": 2026,
+    "url": "https://github.com/deepseek-ai/deepseek-harness",
+    "type": "software",
+    "doi": null
+  },
+  {
+    "key": "cordis",
+    "authors": "Cordis contributors",
+    "title": "Cordis: a cordis-style plugin framework",
+    "venue": "GitHub",
+    "year": 2026,
+    "url": "https://github.com/cordiverse/cordis",
+    "type": "software",
+    "doi": null
+  },
+  {
+    "key": "eventsourcing",
+    "authors": "Fowler, M.",
+    "title": "Event sourcing",
+    "venue": "martinfowler.com",
+    "year": 2005,
+    "url": "https://martinfowler.com/eaaDev/EventSourcing.html",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "jsonl",
+    "authors": "JSON Lines contributors",
+    "title": "JSON Lines: newline-delimited JSON",
+    "venue": "jsonlines.org",
+    "year": 2024,
+    "url": "https://jsonlines.org",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "zstd",
+    "authors": "Collet, Y. & Kucherawy, M. (eds)",
+    "title": "Zstandard compression and the application/zstd media type",
+    "venue": "RFC 8878, Internet Engineering Task Force",
+    "year": 2021,
+    "url": "https://www.rfc-editor.org/rfc/rfc8878",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "json",
+    "authors": "Bray, T. (ed.)",
+    "title": "The JavaScript Object Notation (JSON) data interchange format",
+    "venue": "RFC 8259, Internet Engineering Task Force",
+    "year": 2017,
+    "url": "https://www.rfc-editor.org/rfc/rfc8259",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "localfirst",
+    "authors": "Kleppmann, M., Wiggins, A., van Hardenberg, P. & McGranaghan, M.",
+    "title": "Local-first software: you own your data, in spite of the cloud",
+    "venue": "Proceedings of the ACM SIGPLAN Onward! Symposium",
+    "year": 2019,
+    "url": "https://doi.org/10.1145/3359591.3359737",
+    "type": "paper",
+    "doi": "10.1145/3359591.3359737"
+  },
+  {
+    "key": "crdt",
+    "authors": "Shapiro, M., Preguiça, N., Baquero, C. & Zawirski, M.",
+    "title": "Conflict-free replicated data types",
+    "venue": "Stabilization, Safety, and Security of Distributed Systems (SSS)",
+    "year": 2011,
+    "url": "https://doi.org/10.1007/978-3-642-24550-3_29",
+    "type": "paper",
+    "doi": "10.1007/978-3-642-24550-3_29"
+  },
+  {
+    "key": "dynamo",
+    "authors": "DeCandia, G. et al.",
+    "title": "Dynamo: Amazon's highly available key-value store",
+    "venue": "Proceedings of the 21st ACM Symposium on Operating Systems Principles (SOSP)",
+    "year": 2007,
+    "url": "https://doi.org/10.1145/1294261.1294281",
+    "type": "paper",
+    "doi": "10.1145/1294261.1294281"
+  },
+  {
+    "key": "bayou",
+    "authors": "Terry, D. B., Theimer, M. M., Petersen, K., Demers, A. J. & Spreitzer, M. J.",
+    "title": "Managing update conflicts in Bayou, a weakly connected replicated storage system",
+    "venue": "Proceedings of the 15th ACM Symposium on Operating Systems Principles (SOSP)",
+    "year": 1995,
+    "url": "https://doi.org/10.1145/224056.224070",
+    "type": "paper",
+    "doi": "10.1145/224056.224070"
+  },
+  {
+    "key": "syncthing",
+    "authors": "Syncthing contributors",
+    "title": "Syncthing: continuous file synchronization",
+    "venue": "GitHub",
+    "year": 2024,
+    "url": "https://github.com/syncthing/syncthing",
+    "type": "software",
+    "doi": null
+  },
+  {
+    "key": "matrix",
+    "authors": "Matrix.org Foundation",
+    "title": "Matrix specification",
+    "venue": "Matrix.org",
+    "year": 2024,
+    "url": "https://spec.matrix.org/latest/",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "rsync",
+    "authors": "Tridgell, A. & Mackerras, P.",
+    "title": "The rsync algorithm",
+    "venue": "Technical Report TR-CS-96-05, Australian National University",
+    "year": 1996,
+    "url": "https://rsync.samba.org/tech_report/",
+    "type": "paper",
+    "doi": null
+  },
+  {
+    "key": "git",
+    "authors": "Chacon, S. & Straub, B.",
+    "title": "Pro Git",
+    "venue": "Apress",
+    "year": 2014,
+    "url": "https://git-scm.com/book/en/v2",
+    "type": "book",
+    "doi": null
+  },
+  {
+    "key": "aesgcm",
+    "authors": "Dworkin, M.",
+    "title": "Recommendation for block cipher modes of operation: Galois/Counter Mode (GCM) and GMAC",
+    "venue": "NIST Special Publication 800-38D",
+    "year": 2007,
+    "url": "https://doi.org/10.6028/NIST.SP.800-38D",
+    "type": "standard",
+    "doi": "10.6028/NIST.SP.800-38D"
+  },
+  {
+    "key": "gcm",
+    "authors": "McGrew, D. A. & Viega, J.",
+    "title": "The Galois/Counter Mode of operation (GCM)",
+    "venue": "Progress in Cryptology — INDOCRYPT 2004",
+    "year": 2004,
+    "url": "https://doi.org/10.1007/978-3-540-30539-2_21",
+    "type": "paper",
+    "doi": "10.1007/978-3-540-30539-2_21"
+  },
+  {
+    "key": "hkdf",
+    "authors": "Krawczyk, H. & Eronen, P.",
+    "title": "HMAC-based extract-and-expand key derivation function (HKDF)",
+    "venue": "RFC 5869, Internet Engineering Task Force",
+    "year": 2010,
+    "url": "https://www.rfc-editor.org/rfc/rfc5869",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "pbkdf2",
+    "authors": "Moriarty, K., Kaliski, B. & Rusch, A.",
+    "title": "PKCS #5: password-based cryptography specification version 2.1",
+    "venue": "RFC 8018, Internet Engineering Task Force",
+    "year": 2017,
+    "url": "https://www.rfc-editor.org/rfc/rfc8018",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "aead",
+    "authors": "McGrew, D.",
+    "title": "An interface and algorithms for authenticated encryption",
+    "venue": "RFC 5116, Internet Engineering Task Force",
+    "year": 2008,
+    "url": "https://www.rfc-editor.org/rfc/rfc5116",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "doubleratchet",
+    "authors": "Perrin, T. & Marlinspike, M.",
+    "title": "The double ratchet algorithm",
+    "venue": "Signal Foundation",
+    "year": 2016,
+    "url": "https://signal.org/docs/specifications/doubleratchet/",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "noise",
+    "authors": "Perrin, T.",
+    "title": "The Noise Protocol Framework",
+    "venue": "noiseprotocol.org",
+    "year": 2018,
+    "url": "https://noiseprotocol.org/noise.html",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "spake2",
+    "authors": "Taubert, T. & Wood, C. A.",
+    "title": "SPAKE2, a PAKE",
+    "venue": "RFC 9382, Internet Engineering Task Force",
+    "year": 2023,
+    "url": "https://www.rfc-editor.org/rfc/rfc9382",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "opaque",
+    "authors": "Jarecki, S., Krawczyk, H. & Xu, J.",
+    "title": "OPAQUE: an asymmetric PAKE protocol secure against pre-computation attacks",
+    "venue": "Advances in Cryptology — EUROCRYPT 2018",
+    "year": 2018,
+    "url": "https://doi.org/10.1007/978-3-319-78372-7_15",
+    "type": "paper",
+    "doi": "10.1007/978-3-319-78372-7_15"
+  },
+  {
+    "key": "tls13",
+    "authors": "Rescorla, E.",
+    "title": "The Transport Layer Security (TLS) protocol version 1.3",
+    "venue": "RFC 8446, Internet Engineering Task Force",
+    "year": 2018,
+    "url": "https://www.rfc-editor.org/rfc/rfc8446",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "websocket",
+    "authors": "Fette, I. & Melnikov, A.",
+    "title": "The WebSocket protocol",
+    "venue": "RFC 6455, Internet Engineering Task Force",
+    "year": 2011,
+    "url": "https://www.rfc-editor.org/rfc/rfc6455",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "sameorigin",
+    "authors": "Barth, A.",
+    "title": "The Web Origin concept",
+    "venue": "RFC 6454, Internet Engineering Task Force",
+    "year": 2011,
+    "url": "https://www.rfc-editor.org/rfc/rfc6454",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "asvs",
+    "authors": "OWASP",
+    "title": "Application Security Verification Standard 4.0.3",
+    "venue": "OWASP Foundation",
+    "year": 2021,
+    "url": "https://owasp.org/www-project-application-security-verification-standard/",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "electron",
+    "authors": "OpenJS Foundation",
+    "title": "Electron documentation",
+    "venue": "Electron",
+    "year": 2024,
+    "url": "https://www.electronjs.org/docs/latest/",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "node",
+    "authors": "OpenJS Foundation",
+    "title": "Node.js documentation",
+    "venue": "Node.js",
+    "year": 2024,
+    "url": "https://nodejs.org/docs/latest-v22.x/api/",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "chromium",
+    "authors": "Chromium authors",
+    "title": "Chrome for Testing",
+    "venue": "Chromium project",
+    "year": 2024,
+    "url": "https://developer.chrome.com/blog/chrome-for-testing",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "tailscale",
+    "authors": "Tailscale",
+    "title": "Tailscale: a mesh VPN built on WireGuard",
+    "venue": "Tailscale",
+    "year": 2024,
+    "url": "https://tailscale.com/kb/",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "cloudflared",
+    "authors": "Cloudflare",
+    "title": "Cloudflare Tunnel",
+    "venue": "Cloudflare",
+    "year": 2024,
+    "url": "https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/",
+    "type": "documentation",
+    "doi": null
+  },
+  {
+    "key": "gdpr",
+    "authors": "European Parliament and Council",
+    "title": "Regulation (EU) 2016/679 on the protection of natural persons with regard to the processing of personal data",
+    "venue": "Official Journal of the European Union",
+    "year": 2016,
+    "url": "https://eur-lex.europa.eu/eli/reg/2016/679/oj",
+    "type": "standard",
+    "doi": null
+  },
+  {
+    "key": "zerotrust",
+    "authors": "Rose, S., Borchert, O., Mitchell, S. & Connelly, S.",
+    "title": "Zero trust architecture",
+    "venue": "NIST Special Publication 800-207",
+    "year": 2020,
+    "url": "https://doi.org/10.6028/NIST.SP.800-207",
+    "type": "standard",
+    "doi": "10.6028/NIST.SP.800-207"
+  },
+  {
+    "key": "sok",
+    "authors": "Unger, N. et al.",
+    "title": "SoK: secure messaging",
+    "venue": "Proceedings of the 2015 IEEE Symposium on Security and Privacy",
+    "year": 2015,
+    "url": "https://doi.org/10.1109/SP.2015.36",
+    "type": "paper",
+    "doi": "10.1109/SP.2015.36"
+  }
+]

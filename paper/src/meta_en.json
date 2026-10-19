@@ -1,0 +1,12 @@
+{
+  "title": "Deep Connect: account-bound, end-to-end encrypted multi-device synchronisation for local agentic workstations",
+  "subtitle": "Same-account workstations meet through a ciphertext-only relay, share conversation and task state, and hand prompts to the machine that owns the session",
+  "authors": "Zeng Pu<sup>1</sup>",
+  "affil": "<sup>1</sup>DeepSeek Harness plugin ecosystem. Correspondence: zengpu987@gmail.com",
+  "meta": "Received 19 October 2026 · Accepted 19 October 2026 · Published online 19 October 2026 · Preprint, not peer reviewed · CC BY 4.0",
+  "running": "account-bound multi-device sync",
+  "abstract_label": "Abstract",
+  "refs_title": "References",
+  "footer": "Code, relay, tests and the measurement harness: github.com/zengpu987-ctrl/dsh-deep-connect · MIT licence",
+  "abstract": "Agentic workstations keep the model call, the tools and the files on one machine, so a session that is running is bound to that machine. The same person, however, works across a laptop, a desktop and a lab server. We describe Deep Connect, a plugin for the DeepSeek Harness that makes same-account installations of the workstation mutually visible without a pairing ceremony, a user account on a server, or plaintext ever reaching the relay. Devices derive a routing channel from the signed-in account and a frame key from the same secret with PBKDF2-HMAC-SHA-256 (210,000 iterations); every envelope is AES-256-GCM with the sender, recipient and version bound as associated data. A self-hosted relay stores only ciphertext and an offline mailbox. Devices broadcast an index of local conversations, fold task state (todos, goals, team tasks) out of the same event log, pull full transcripts on demand, and can deliver a new prompt to the machine that owns a session, keeping a single writer per log. Measured end to end: key derivation takes {{kdf_mean}} ± {{kdf_sd}} ms, a request/response through the relay takes {{rtt1k_mean}} ms at 1 KiB and {{rtt64k_mean}} ms at 64 KiB, a 200-session index costs {{index_build_200}} ms to build and {{index_wire_200}} KiB on the wire, and 1,500 tampered, retargeted and wrongly-keyed frames were rejected without exception. The implementation is {{code_lines}} lines and is verified by 174 automated checks, including the two field failures that motivated its final design: an offline mailbox that was never drained on socket reconnect, and a half-open socket that kept a departed device 'online' while envelopes written to it were lost."
+}

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<title>{{TITLE}}</title>
+<style>
+  @page { size: A4; margin: 20mm 16mm 16mm; }
+  :root {
+    --ink: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7;
+    --red: #b31b1b; --blue: #1d4ed8;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    margin: 0; color: var(--ink); background: white;
+    font-family: "Times New Roman", "Songti SC", "STSong", serif;
+    font-size: 9.7pt; line-height: 1.56; text-align: justify;
+    hyphens: auto; -webkit-hyphens: auto;
+  }
+  .masthead {
+    display: flex; justify-content: space-between; align-items: flex-end;
+    border-bottom: 1.4pt solid var(--ink); padding-bottom: 3px; margin-bottom: 12px;
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 7.2pt;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  }
+  .masthead .wordmark {
+    font-family: Georgia, serif; font-size: 16pt; letter-spacing: -.02em;
+    color: var(--red); text-transform: none;
+  }
+  h1.title {
+    font-family: Georgia, "Times New Roman", serif; font-size: 20.5pt; line-height: 1.14;
+    margin: 6px 0 6px; font-weight: 700; letter-spacing: -.01em; text-align: left;
+    hyphens: none; -webkit-hyphens: none;
+  }
+  .subtitle {
+    font-family: Georgia, serif; font-size: 10.5pt; color: var(--muted);
+    margin: 0 0 10px; font-style: italic; text-align: left;
+  }
+  .byline { font-size: 10.2pt; margin: 10px 0 2px; }
+  .affil, .meta {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 7.4pt;
+    color: var(--muted); margin: 2px 0; text-align: left;
+  }
+  .rule { border-top: 3px solid var(--ink); margin: 10px 0 10px; }
+  .abstract {
+    background: #f7f7f9; border: 0.6pt solid var(--line);
+    padding: 10px 12px; margin: 8px 0 14px; font-size: 9.4pt;
+  }
+  .abstract .label {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 7.6pt;
+    letter-spacing: .12em; text-transform: uppercase; display: block; margin-bottom: 4px;
+  }
+  .kicker {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 7.4pt;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--red); margin: 0 0 4px;
+  }
+  h2.section {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 13pt; font-weight: 700;
+    margin: 16px 0 6px; padding-top: 6px; border-top: 0.6pt solid var(--line);
+    text-align: left;
+  }
+  h3.subsection {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 10pt; font-weight: 700;
+    margin: 11px 0 3px; text-align: left;
+  }
+  p { margin: 0 0 6.2px; text-indent: 10pt; }
+  p.lead { text-indent: 0; }
+  h2.section + p, h3.subsection + p, figure + p, .table-block + p { text-indent: 0; }
+  .small { font-size: 8.3pt; color: var(--muted); }
+  sup { font-size: 6.4pt; line-height: 0; vertical-align: super; }
+  a { color: var(--blue); text-decoration: none; }
+  .figure { margin: 10px 0 10px; page-break-inside: avoid; }
+  .figure img { width: 100%; display: block; }
+  .figure.w75 img { width: 75%; margin: 0 auto; }
+  .figure.w85 img { width: 85%; margin: 0 auto; }
+  .caption {
+    font-size: 7.7pt; line-height: 1.38; color: var(--ink); margin-top: 5px;
+    text-align: justify;
+  }
+  .caption b { font-family: "Helvetica Neue", Arial, sans-serif; }
+  .table-block { margin: 9px 0; page-break-inside: avoid; font-size: 7.4pt; }
+  .table-title { font-size: 7.5pt; line-height: 1.34; margin-bottom: 3px; }
+  .table-title b { font-family: "Helvetica Neue", Arial, sans-serif; }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  td, th { overflow-wrap: anywhere; }
+  th, td { padding: 2.2px 3.4px; vertical-align: top; }
+  thead th {
+    border-top: 1.2pt solid var(--ink); border-bottom: 0.7pt solid var(--ink);
+    font-family: "Helvetica Neue", Arial, sans-serif; font-weight: 700;
+    text-align: left; font-size: 7.3pt;
+  }
+  tbody tr:last-child td { border-bottom: 1.2pt solid var(--ink); }
+  tbody tr:nth-child(even) td { background: #fafafa; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .center { text-align: center; }
+  .refs { font-size: 7.4pt; line-height: 1.34; }
+  .refs ol { margin: 0; padding-left: 16px; }
+  .refs li { margin-bottom: 2.6px; }
+  .refs .doi { color: var(--muted); }
+  .box {
+    background: #f7f7f9; border-left: 2.2pt solid var(--blue);
+    padding: 7px 9px; margin: 8px 0; font-size: 8.6pt;
+  }
+  .box .box-title {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 7.6pt;
+    font-weight: 700; margin: 0 0 3px;
+  }
+  .metrics { display: flex; gap: 14px; margin: 8px 0 10px; }
+  .metric { flex: 1; border-top: 1.4pt solid var(--ink); padding-top: 4px; }
+  .metric .k {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 6.8pt;
+    letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  }
+  .metric .v {
+    font-family: "Helvetica Neue", Arial, sans-serif; font-size: 12.5pt;
+    font-weight: 700; line-height: 1.15;
+  }
+  .zh { font-family: "Songti SC", "STSong", "Times New Roman", serif; font-size: 10.2pt; line-height: 1.72; }
+  .zh h1.title { font-family: "Songti SC", "STSong", serif; font-size: 19pt; line-height: 1.25; }
+  .zh .section, .zh .subsection { font-family: "PingFang SC", "Helvetica Neue", sans-serif; }
+  .zh p { text-indent: 2em; }
+  .zh .caption { font-size: 8pt; }
+  .pagebreak { break-before: page; }
+  .mono { font-family: "SF Mono", Menlo, monospace; font-size: 7.2pt; }
+  code { font-family: "SF Mono", Menlo, monospace; font-size: 8pt; background: #f2f2f4; padding: 0 2px; }
+  ul, ol { margin: 2px 0 7px; padding-left: 16px; }
+  li { margin-bottom: 2.2px; }
+</style>
+</head>
+<body class="{{BODYCLASS}}">
+<div class="masthead">
+  <span>Article</span>
+  <span class="wordmark">Deep Connect</span>
+  <span>{{RUNNING}}</span>
+</div>
+<h1 class="title">{{TITLE}}</h1>
+<p class="subtitle">{{SUBTITLE}}</p>
+<p class="byline">{{AUTHORS}}</p>
+<p class="affil">{{AFFIL}}</p>
+<p class="meta">{{META}}</p>
+<div class="rule"></div>
+<div class="abstract">
+  <span class="label">{{ABSTRACT_LABEL}}</span>
+  {{ABSTRACT}}
+</div>
+{{BODY}}
+<h2 class="section">{{REFS_TITLE}}</h2>
+<div class="refs">
+  <ol>
+{{REFS}}
+  </ol>
+</div>
+{{EXTENDED}}
+<div class="small" style="margin-top:10px;text-align:left">{{FOOTER}}</div>
+</body>
+</html>

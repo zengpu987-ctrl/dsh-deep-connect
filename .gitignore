@@ -12,3 +12,7 @@ scratch/
 .idea/
 .vscode/
 *.swp
+
+# Paper intermediates (final PDFs live at paper/*.pdf)
+paper/build/
+paper/.mpl/

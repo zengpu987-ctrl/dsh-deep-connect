@@ -300,7 +300,26 @@ try {
   await observer.waitFor((f) => f.type === 'presence', 8000);
   // `dev-a` stays connected throughout, so a departure broadcast is guaranteed.
   deviceB.close();
-  const departed = await observer.waitFor((f) => f.type === 'presence' && f.devices.find((d) => d.id === 'dev-b')?.online === false, 10_000);
+  // Give the transport a turn to carry the FIN; the assertions below are about
+  // the roster, not about how fast a closed socket is observed.
+  await new Promise((r) => setTimeout(r, 50));
+  // Order-independent: the departure frame may arrive BEFORE the observer's own
+  // join broadcast, in which case waiting for "another" presence frame would
+  // deadlock even though the roster already says the peer left. Poll the newest
+  // presence frame instead.
+  const departed = await (async () => {
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const frames = observer.frames.filter((f) => f.type === 'presence');
+      const newest = frames[frames.length - 1];
+      if (newest !== undefined && newest.devices.find((d) => d.id === 'dev-b')?.online === false) return newest;
+      if (Date.now() > deadline) {
+        console.log('    · presence frames seen:', JSON.stringify(frames.map((f) => f.devices.map((d) => `${d.id}:${d.online}`))));
+        throw new Error('observer never saw dev-b reported offline');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  })();
   check(departed.devices.find((d) => d.id === 'dev-b').online === false, 'a third online device is told the peer left');
   const rosterAfterLeave = await fetch(`${base}/v1/devices`, { headers: { 'x-dsh-connect-channel': channel } }).then((r) => r.json());
   check(rosterAfterLeave.devices.find((d) => d.id === 'dev-b').online === false, 'the HTTP roster agrees the peer is offline');
@@ -322,6 +341,34 @@ try {
     body: JSON.stringify({ deviceId: 'dev-b' }),
   }).then((r) => r.json());
   check(recv2.messages.length === 0, 'the mailbox drains exactly once');
+
+  section('queued mail is delivered on socket reconnect');
+  // Regression: envelopes parked for an offline device used to be handed over
+  // only through the HTTP mailbox path. A device that came back over the socket
+  // therefore never saw anything it missed. The relay now drains the mailbox in
+  // its `hello` handler, before the welcome frame's pending count is reported.
+  const away = await connect(`${wsBase}/ws`, { 'x-dsh-connect-channel': channel });
+  away.send({ type: 'hello', deviceId: 'dev-late', name: 'Late' });
+  await away.waitFor((f) => f.type === 'welcome');
+  away.close();
+  await new Promise((r) => setTimeout(r, 100));
+  // The queueing answer is what proves the relay parked the envelope; a fixed
+  // sleep races the close handler and produced a flaky "pending: 0".
+  const queuedResponse = await fetch(`${base}/v1/send`, {
+    method: 'POST',
+    headers: { 'x-dsh-connect-channel': channel, 'content-type': 'application/json' },
+    body: JSON.stringify({ deviceId: 'dev-a', to: 'dev-late', id: 'e-while-away', body: seal({ note: 'missed you' }) }),
+  }).then((r) => r.json());
+  check(queuedResponse.queuedFor.includes('dev-late'), 'the relay parked the envelope for the absent device');
+  const returning = await connect(`${wsBase}/ws`, { 'x-dsh-connect-channel': channel });
+  returning.send({ type: 'hello', deviceId: 'dev-late', name: 'Late' });
+  const welcomeBack = await returning.waitFor((f) => f.type === 'welcome');
+  check(welcomeBack.pending === 1, `the welcome frame reports the queued backlog (${welcomeBack.pending})`);
+  const drained = await returning.waitFor((f) => f.type === 'message' && f.envelope?.id === 'e-while-away', 5000);
+  check(drained.envelope.from === 'dev-a', 'the queued envelope is delivered right after reconnect');
+  check(open(drained.envelope.body).note === 'missed you', 'the redelivered body still decrypts');
+  returning.close();
+  await new Promise((r) => setTimeout(r, 100));
 
   section('mailbox bound and long-poll');
   for (let i = 0; i < 8; i += 1) {
