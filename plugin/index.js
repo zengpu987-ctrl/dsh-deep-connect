@@ -41,7 +41,7 @@ import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_
 export const name = 'deep-connect';
 
 /** The version shown in the panel and compared against GitHub releases. */
-export const PLUGIN_VERSION = '4.0.1';
+export const PLUGIN_VERSION = '4.0.2';
 /** GitHub repository the updater asks about. */
 const UPDATE_REPO = 'zengpu987-ctrl/dsh-deep-connect';
 /** Check at most this often unless the user asks explicitly. */
@@ -816,11 +816,18 @@ export function apply(ctx, config) {
       transport: '',
     };
     const attempts = [
-      // jsDelivr first: a CDN, no unauthenticated rate limit, and it lists the
-      // same tags. GitHub's API is second because 60 requests/hour is easy to
-      // exhaust on a shared IP, and a 403 there must not hide a release.
-      ['jsdelivr', async () => httpsGetJson(`https://data.jsdelivr.com/v1/packages/gh/${UPDATE_REPO}`, { timeoutMs: 12_000 })],
+      // Every source is consulted, and the HIGHEST version wins. Stopping at the
+      // first success would let a stale CDN edge hide a release that another
+      // source already knows about.
+      ['jsdelivr', async () => {
+        const body = await httpsGetJson(`https://data.jsdelivr.com/v1/packages/gh/${UPDATE_REPO}`, { timeoutMs: 12_000 });
+        return (body?.versions ?? []).map((entry) => ({ name: entry?.version }));
+      }],
       ['github', async () => httpsGetJson(`https://api.github.com/repos/${UPDATE_REPO}/tags?per_page=50`, { headers: { accept: 'application/vnd.github+json' }, timeoutMs: 12_000 })],
+      ['raw', async () => {
+        const body = await httpsGetJson(`https://raw.githubusercontent.com/${UPDATE_REPO}/main/plugin/package.json`, { timeoutMs: 12_000 });
+        return body?.version === undefined ? [] : [{ name: body.version }];
+      }],
       ['curl', async () => JSON.parse((await curlGet(`https://api.github.com/repos/${UPDATE_REPO}/tags?per_page=50`, { timeoutMs: 15_000 })).toString('utf8'))],
       ['fetch', async () => {
         const response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/tags?per_page=50`, {
@@ -832,25 +839,30 @@ export function apply(ctx, config) {
       }],
     ];
     const errors = [];
+    const transports = [];
+    let latest = '';
+    // Sequential on purpose: this runs at most every ten minutes and the first
+    // source usually answers, so serial keeps the log readable.
     for (const [transport, attempt] of attempts) {
       try {
         const body = await attempt();
-        // GitHub tags return `[{name}]`; jsDelivr returns `{versions:[{version}]}`.
         const list = Array.isArray(body) ? body : Array.isArray(body?.versions) ? body.versions.map((entry) => ({ name: entry?.version })) : [];
-        const latest = pickLatestVersion(list);
-        if (latest === '') throw new Error('响应里没有可识别的版本号');
-        info.latest = latest;
-        info.transport = transport;
-        info.url = `https://github.com/${UPDATE_REPO}/releases/tag/v${latest}`;
-        info.outdated = compareVersion(latest, PLUGIN_VERSION) > 0;
-        info.command = `curl -fsSL https://cdn.jsdelivr.net/gh/${UPDATE_REPO}@v${latest}/install.sh | bash`;
-        errors.length = 0;
-        break;
+        const candidate = pickLatestVersion(list);
+        if (candidate === '') throw new Error('响应里没有可识别的版本号');
+        transports.push(transport);
+        if (latest === '' || compareVersion(candidate, latest) > 0) latest = candidate;
       } catch (error) {
         errors.push(`${transport}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    if (info.latest === '') {
+    info.latest = latest;
+    info.transport = transports.join('+');
+    info.url = latest === '' ? '' : `https://github.com/${UPDATE_REPO}/releases/tag/v${latest}`;
+    info.outdated = latest !== '' && compareVersion(latest, PLUGIN_VERSION) > 0;
+    info.command = latest === ''
+      ? ''
+      : `curl -fsSL https://cdn.jsdelivr.net/gh/${UPDATE_REPO}@v${latest}/install.sh | bash`;
+    if (latest === '') {
       info.error = errors.join(' · ').slice(0, 400);
       // Retry in ten minutes, not six hours: a flaky proxy must not hide updates.
       state.nextUpdateCheckAt = Date.now() + 10 * 60_000;

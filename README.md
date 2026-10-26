@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.1/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.2/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -69,7 +69,7 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.1/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.2/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -92,6 +92,20 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.1/in
 
 想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
 在面板里改填那条地址即可，协议与中继站完全一样。
+
+---
+
+## v4.0.2：更新检查不再被单个 CDN 的缓存骗到
+
+4.0.1 的链路是「第一个成功即采用」。实测发现 jsDelivr 的包版本列表会滞后几分钟：
+刚发 v4.0.1 后它仍返回 v4.0.0，先采用它就会让用户看不到新版本。
+
+4.0.2 改成**所有来源都问一遍、取最高版本**：jsDelivr 包 API、GitHub tags、
+raw.githubusercontent 的 `plugin/package.json`、curl、fetch 各自独立尝试，
+任何一个成功都计入候选，最后按 semver 取最大值；`transport` 字段记录本次哪些来源成功。
+全部失败仍是 10 分钟后重试，成功后 6 小时再查。
+
+实测（本机代理环境）：`transport=jsdelivr+github+raw+curl+fetch`，`latest=4.0.1`。
 
 ---
 
