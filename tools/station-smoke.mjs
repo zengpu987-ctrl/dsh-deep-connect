@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { RelayStation, parseStationLink, stationLink, findCloudflared, lanAddress } from '../plugin/host/station.js';
+import { RelayStation, adoptStation, parseStationLink, stationLink, findCloudflared, lanAddress } from '../plugin/host/station.js';
 
 const failures = [];
 const check = (condition, label, extra = '') => {
@@ -30,6 +30,7 @@ const check = (condition, label, extra = '') => {
 };
 
 const dir = mkdtempSync(join(tmpdir(), 'deep-connect-station-'));
+const section = (title) => console.log(`\n${title}`);
 const station = new RelayStation({ root: dir, log: () => {} });
 
 try {
@@ -95,6 +96,26 @@ try {
     }
     await publicRelay.stop();
   }
+
+  section('a new process adopts a running station (update continuity)');
+  const adoptRoot = join(dir, 'adopt');
+  const owner = new RelayStation({ root: adoptRoot, log: () => {} });
+  const running = await owner.start({ preferPublic: false });
+  // Simulate "Harness restarted after a plugin update": the owner object goes
+  // away but its detached processes keep running.
+  const adopted = await adoptStation({ root: adoptRoot });
+  check(adopted !== undefined, 'the next process finds the station');
+  check(adopted?.baseUrl === running.baseUrl && adopted?.token === running.token, 'the same address and invite token come back');
+  const adoptedHealth = await fetch(`${running.localUrl}/healthz`).then((r) => r.ok).catch(() => false);
+  check(adoptedHealth === true, 'the adopted relay is still serving');
+  await adopted?.stop();
+  let stopped = true;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    stopped = await fetch(`${running.localUrl}/healthz`).then((r) => r.ok).catch(() => false);
+    if (!stopped) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  check(stopped === false, 'stopping the adopted station really stops it');
 
   console.log(`\nlan address: ${lanAddress() ?? '(none)'}`);
 } catch (error) {

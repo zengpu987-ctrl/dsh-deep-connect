@@ -29,13 +29,13 @@ import { RelayClient } from './host/relay.js';
 import { DeepConnectStore } from './host/store.js';
 import { SessionAdapter } from './host/sessions.js';
 import { createInheritedSession } from './host/inherit.js';
-import { RelayStation, parseStationLink, stationLink, findCloudflared } from './host/station.js';
+import { RelayStation, adoptStation, parseStationLink, stationLink, findCloudflared } from './host/station.js';
 import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_VERSION } from './host/crypto.js';
 
 export const name = 'deep-connect';
 
 /** The version shown in the panel and compared against GitHub releases. */
-export const PLUGIN_VERSION = '3.0.1';
+export const PLUGIN_VERSION = '3.0.2';
 /** GitHub repository the updater asks about. */
 const UPDATE_REPO = 'zengpu987-ctrl/dsh-deep-connect';
 /** Check at most this often unless the user asks explicitly. */
@@ -61,6 +61,7 @@ const KIND = {
   history: 'history',
   prompt: 'prompt',
   export: 'export',
+  task: 'task',
   ping: 'ping',
 };
 
@@ -106,6 +107,9 @@ export function apply(ctx, config) {
     stationUrl: String(config?.stationUrl ?? ''),
     stationToken: String(config?.stationToken ?? ''),
     stationRole: config?.stationRole === 'host' ? 'host' : config?.stationRole === 'join' ? 'join' : '',
+    // v3.0.2: whether this machine shares conversation bodies (and allows
+    // inheritance) with the station. The index stays visible either way.
+    shareMemory: config?.shareMemory !== false,
     autoConnect: config?.autoConnect !== false,
     autoIndex: config?.autoIndex !== false,
     indexIntervalMs: Math.max(5000, Number(config?.indexIntervalMs ?? 15000)),
@@ -156,6 +160,9 @@ export function apply(ctx, config) {
     /** A station this machine is currently hosting (v3). */
     station: undefined,
     stationError: '',
+    stationAdopted: false,
+    /** deviceId -> whether that peer shares conversation bodies. */
+    peerShareMemory: new Map(),
     updateInfo: undefined,
     updateCheckedAt: 0,
     started: false,
@@ -307,7 +314,7 @@ export function apply(ctx, config) {
       state.localIndex = entries.map((entry) => toWireEntry(entry, identity.deviceId, identity.name));
       state.lastIndexError = '';
       log('debug', `索引已更新：${state.localIndex.length} 条会话`);
-      await sendTo('*', { kind: KIND.index, deviceId: identity.deviceId, deviceName: identity.name, at: now, entries: state.localIndex });
+      await sendTo('*', { kind: KIND.index, deviceId: identity.deviceId, deviceName: identity.name, at: now, shareMemory: settings.shareMemory === true, entries: state.localIndex });
     } catch (error) {
       state.lastIndexError = error instanceof Error ? error.message : String(error);
       log('warn', `建立索引失败：${state.lastIndexError}`);
@@ -323,9 +330,11 @@ export function apply(ctx, config) {
       deviceId: from,
       deviceName: typeof payload.deviceName === 'string' ? payload.deviceName : from.slice(0, 8),
       at: Number(payload.at ?? Date.now()),
+      shareMemory: payload.shareMemory !== false,
       entries: Array.isArray(payload.entries) ? payload.entries : [],
     };
     await store.setRemoteIndex(from, document);
+    state.peerShareMemory.set(from, document.shareMemory !== false);
     log('debug', `收到 ${document.deviceName} 的索引：${document.entries.length} 条`);
     queuePeerSync(from, document.entries);
   }
@@ -423,7 +432,10 @@ export function apply(ctx, config) {
     for (const peer of store.getPeers()) {
       if (peer.deviceId === identity.deviceId || peer.online !== true) continue;
       const document = await store.getRemoteIndex(peer.deviceId).catch(() => undefined);
-      if (document !== undefined) queuePeerSync(peer.deviceId, document.entries ?? []);
+      if (document !== undefined) {
+        state.peerShareMemory.set(peer.deviceId, document.shareMemory !== false);
+        queuePeerSync(peer.deviceId, document.entries ?? []);
+      }
     }
   }
 
@@ -431,6 +443,10 @@ export function apply(ctx, config) {
   async function serveHistory(from, payload, requestId) {
     const sessionId = String(payload?.sessionId ?? '');
     if (sessionId === '') return;
+    if (!settings.shareMemory) {
+      await state.relay?.reply(from, requestId, { kind: KIND.history, sessionId, error: 'memory-sharing-off' });
+      return;
+    }
     const exported = await sessions.exportTranscript(sessionId);
     if (exported === undefined) {
       await state.relay?.reply(from, requestId, { kind: KIND.history, sessionId, error: 'not-found' });
@@ -459,6 +475,10 @@ export function apply(ctx, config) {
   async function serveExport(from, payload, requestId) {
     const sessionId = String(payload?.sessionId ?? '');
     if (sessionId === '') return;
+    if (!settings.shareMemory) {
+      await state.relay?.reply(from, requestId, { kind: KIND.export, sessionId, error: 'memory-sharing-off' });
+      return;
+    }
     const read = await sessions.readEvents(sessionId);
     if (read === undefined) {
       await state.relay?.reply(from, requestId, { kind: KIND.export, sessionId, error: 'not-found' });
@@ -538,6 +558,53 @@ export function apply(ctx, config) {
     }
   }
 
+  /**
+   * Run a command on this machine on behalf of a peer.
+   *
+   * Unlike the per-session prompt, this may start a NEW session: "发命令给另一台
+   * 的 DSH，在另一台上做" is a request to work here, not to continue a specific
+   * conversation.
+   */
+  async function serveTask(from, payload, requestId) {
+    const text = String(payload?.text ?? '').trim();
+    const controller = ctx.get?.('sessionController');
+    const makeSession = controller?.create;
+    const prompt = controller?.prompt;
+    if (text === '' || typeof prompt !== 'function') {
+      await state.relay?.reply(from, requestId, { kind: KIND.task, accepted: false, reason: 'controller-unavailable' });
+      return;
+    }
+    try {
+      let sessionId = String(payload?.sessionId ?? '');
+      if (sessionId === '') {
+        if (typeof makeSession !== 'function') {
+          await state.relay?.reply(from, requestId, { kind: KIND.task, accepted: false, reason: 'create-unavailable' });
+          return;
+        }
+        const created = await makeSession.call(controller, {});
+        sessionId = String(created?.sessionId ?? '');
+      }
+      if (sessionId === '') {
+        await state.relay?.reply(from, requestId, { kind: KIND.task, accepted: false, reason: 'create-failed' });
+        return;
+      }
+      await prompt.call(controller, {
+        requestId: `dc-${frameId('r')}`,
+        sessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text }],
+      });
+      log('info', `已接受来自 ${from.slice(0, 12)} 的任务，写入会话 ${sessionId}`);
+      state.lastIndexAt = 0;
+      setTimeout(() => void publishIndex(), 500).unref?.();
+      await state.relay?.reply(from, requestId, { kind: KIND.task, sessionId, accepted: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log('warn', `执行对端任务失败：${message}`);
+      await state.relay?.reply(from, requestId, { kind: KIND.task, accepted: false, reason: message });
+    }
+  }
+
   /** Dispatch one decrypted envelope. */
   async function onFrame({ from, payload }) {
     const kind = payload?.kind;
@@ -556,6 +623,7 @@ export function apply(ctx, config) {
     if (requestId === undefined) return;
     if (payload?.need === KIND.history) await serveHistory(from, payload, requestId);
     else if (payload?.need === KIND.export) await serveExport(from, payload, requestId);
+    else if (payload?.need === KIND.task) await serveTask(from, payload, requestId);
     else if (payload?.need === KIND.prompt) await servePrompt(from, payload, requestId);
   }
 
@@ -620,6 +688,7 @@ export function apply(ctx, config) {
       token,
       link: url !== '' && token !== '' ? stationLink(url, token) : '',
       running: live?.running === true,
+      adopted: live?.adopted === true,
       public: live?.public === true,
       lanUrl: live?.lanUrl ?? '',
       startedAt: Number(live?.startedAt ?? 0),
@@ -762,6 +831,7 @@ export function apply(ctx, config) {
         lastSeen: Number(peer.lastSeen ?? 0),
         fingerprint: '',
         sessionCount: rows.filter((row) => row.ownerId === peer.deviceId).length,
+        shareMemory: state.peerShareMemory.get(peer.deviceId) !== false,
       }));
     return {
       self: {
@@ -777,6 +847,7 @@ export function apply(ctx, config) {
         accountName: state.accountName,
         outbox: relay.outbox ?? 0,
         httpMode: relay.httpMode === true,
+        shareMemory: settings.shareMemory === true,
       },
       peers,
       sessions: rows,
@@ -824,11 +895,24 @@ export function apply(ctx, config) {
       for (const key of ['relayUrl', 'token', 'secret', 'deviceName']) {
         if (typeof body[key] === 'string') patch[key] = body[key];
       }
-      for (const key of ['autoConnect', 'autoIndex']) {
+      for (const key of ['autoConnect', 'autoIndex', 'shareMemory']) {
         if (typeof body[key] === 'boolean') patch[key] = body[key];
       }
       const merged = await store.setConfig(patch);
-      Object.assign(settings, merged);
+      // `merged` is the PERSISTED config; a Loader-provided relayUrl (the normal
+      // deployment) is not persisted, so copying it wholesale would erase the
+      // live connection. Only take a value that is actually set.
+      for (const key of ['relayUrl', 'token', 'secret', 'stationUrl', 'stationToken', 'stationRole', 'deviceName']) {
+        // An explicit patch (even '') wins; otherwise only a non-empty persisted
+        // value is adopted, so a Loader-provided relayUrl survives.
+        if (typeof patch[key] === 'string') settings[key] = patch[key];
+        else if (typeof merged[key] === 'string' && merged[key] !== '') settings[key] = merged[key];
+      }
+      settings.autoConnect = merged.autoConnect;
+      settings.autoIndex = merged.autoIndex;
+      settings.indexIntervalMs = merged.indexIntervalMs;
+      settings.historyLimitEvents = merged.historyLimitEvents;
+      settings.shareMemory = merged.shareMemory;
       if (patch.deviceName !== undefined) {
         settings.deviceName = patch.deviceName;
       }
@@ -843,6 +927,10 @@ export function apply(ctx, config) {
         key: state.key,
         deviceName: settings.deviceName,
       });
+      // A memory-sharing change must reach peers promptly: they gate their
+      // inherit/body requests on the flag carried by the index.
+      state.lastIndexAt = 0;
+      void publishIndex({ force: true }).catch(() => undefined);
       if (!established.ok && established.reason === 'signed-out') {
         log('warn', '尚未登录 DeepSeek 账号，且没有设置口令，无法派生密钥');
       }
@@ -967,6 +1055,21 @@ export function apply(ctx, config) {
       };
     }
 
+    if (action === 'task-run') {
+      const deviceId = String(body.deviceId ?? '');
+      const text = String(body.text ?? '').trim();
+      if (deviceId === '' || text === '') throw badRequest('deviceId and text are required');
+      if (deviceId === store.getIdentity().deviceId) throw badRequest('这台就是本机，请直接在 DSH 里执行');
+      const peer = store.getPeers().find((entry) => entry.deviceId === deviceId);
+      if (peer === undefined || peer.online !== true || state.relay?.connected !== true) {
+        throw notFound('对端设备当前不在线，无法下发任务');
+      }
+      const reply = await askPeer(deviceId, { need: KIND.task, text }, 60_000);
+      if (reply === undefined) throw notFound('对端没有在超时时间内确认，请稍后重试');
+      if (reply.accepted !== true) throw badRequest(`对端拒绝执行：${String(reply.reason ?? 'unknown')}`);
+      return { accepted: true, sessionId: String(reply.sessionId ?? ''), deviceId };
+    }
+
     if (action === 'station-create') {
       const station = await createStation(body.public !== false);
       return { station, view: await buildListView() };
@@ -1066,16 +1169,26 @@ export function apply(ctx, config) {
       settings.stationToken = settings.stationToken || persisted.stationToken;
       settings.stationRole = settings.stationRole || persisted.stationRole;
       if (settings.stationRole === 'host') {
-        // The relay AND its quick tunnel were children of the previous process,
-        // so this address is dead. Do not dial a URL that cannot answer; ask for
-        // a fresh station instead.
-        settings.stationUrl = '';
-        settings.stationToken = '';
-        settings.stationRole = '';
-        settings.relayUrl = '';
-        settings.token = '';
-        state.stationError = '本机上次生成的中继站已随进程停止：请重新生成，并把新链接发给其他设备';
-        await store.setConfig({ stationUrl: '', stationToken: '', stationRole: '', relayUrl: '', token: '' }).catch(() => undefined);
+        // The station processes are detached, so an in-place update keeps the
+        // link alive. Adopt them when they still answer; only ask for a fresh
+        // station when they are really gone.
+        const adopted = await adoptStation({ root, log }).catch(() => undefined);
+        if (adopted !== undefined) {
+          state.station = adopted;
+          state.stationAdopted = true;
+          settings.stationUrl = adopted.baseUrl;
+          settings.stationToken = adopted.token;
+          settings.relayUrl = adopted.localUrl;
+          settings.token = adopted.token;
+        } else {
+          settings.stationUrl = '';
+          settings.stationToken = '';
+          settings.stationRole = '';
+          settings.relayUrl = '';
+          settings.token = '';
+          state.stationError = '本机上次生成的中继站已经不在了：请重新生成，并把新链接发给其他设备';
+          await store.setConfig({ stationUrl: '', stationToken: '', stationRole: '', relayUrl: '', token: '' }).catch(() => undefined);
+        }
       } else if (settings.stationToken !== '') {
         settings.relayUrl = settings.stationUrl;
         settings.token = settings.stationToken;
@@ -1127,7 +1240,10 @@ export function apply(ctx, config) {
           for (const device of devices) {
             if (device.id === identity.deviceId || device.online !== true) continue;
             const document = await store.getRemoteIndex(String(device.id)).catch(() => undefined);
-            if (document !== undefined) queuePeerSync(String(device.id), document.entries ?? []);
+            if (document !== undefined) {
+              state.peerShareMemory.set(String(device.id), document.shareMemory !== false);
+              queuePeerSync(String(device.id), document.entries ?? []);
+            }
           }
         },
         onState: () => {

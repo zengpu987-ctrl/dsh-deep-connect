@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.1/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.2/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -69,7 +69,7 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.1/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.2/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -92,6 +92,25 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.1/in
 
 想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
 在面板里改填那条地址即可，协议与中继站完全一样。
+
+---
+
+## v3.0.2：任务面板、任务内容与接力、记忆共享开关
+
+- **左侧设备栏。** 面板左边是设备列表（本机 + 每台对端，带在线灯、会话数、记忆共享状态），
+  点某台设备就只看它的任务与会话；默认是「全部设备」总览。设置仍在右上角，管互联配置。
+- **任务内容而不只是轨迹。** 索引里现在带任务正文（待办条目、团队任务、目标文案，每会话最多 12 条），
+  设备详情直接列出任务清单；阅读器顶部也显示这条会话的任务内容，正文照旧是完整对话。
+- **任务接力。** 每条对端任务/会话旁有「接力到本机」：把完整事件日志复制成本机一条新会话
+  （同一套继承机制），随后自动切到本机设备、可以继续干；原会话留在对端。
+- **记忆共享开关。** 设备栏上的开关控制本机是否把对话正文共享给中继站：关掉后只广播标题与
+  任务计数，对端拉正文/继承都会被明确拒绝（`memory-sharing-off`），开关状态随索引广播。
+- **更新不断联。** 中继站的中继与隧道改为 detach 启动并落盘 `station.json`：插件升级/重启后
+  新进程直接接续同一个地址与邀请令牌（`adoptStation`），已加入的设备不用重新加入。
+- **图标真的换了。** 侧边栏图标以前是 `client.js` 里内联的地球+链接，不是 `icon.svg`；
+  现在两处都是「一台电脑—锁—另一台电脑」。
+
+> 注意：v3.0.2 未改协议（仍是 v3），所以 3.0.0 / 3.0.1 / 3.0.2 之间可以滚动升级、混跑。
 
 ---
 
@@ -129,7 +148,7 @@ v2 把「点开才拉」变成「一出现就同步」：
 > 本机没挂载 `sessionPersistence` 的部署会直接说明无法继承。
 
 发版检查：`node tools/station-smoke.mjs` 真起一个中继站（relay 子进程 + cloudflared 隧道）并验证令牌、`proto=3` 门禁与邀请链接往返；`node tools/deep-connect-e2e.mjs` 覆盖了自动全文同步、缓存优先读取、
-继承落地这三条新路径（76 项），`relay-smoke`（35 项）与 `client-check`（81 项）不变。
+继承落地这三条新路径（76 项），`relay-smoke`（35 项）与 `client-check`（95 项）不变。
 
 
 ---
@@ -208,9 +227,9 @@ v2 把「点开才拉」变成「一出现就同步」：
 
 ```bash
 node tools/relay-smoke.mjs        # 中继（35 项）
-node tools/station-smoke.mjs      # 一键中继站：真起 relay + cloudflared（12 项）
-node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（87 项）
-node tools/client-check.mjs       # 浏览器半（81 项）
+node tools/station-smoke.mjs      # 一键中继站：真起 relay + cloudflared + 接续（17 项）
+node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（95 项）
+node tools/client-check.mjs       # 浏览器半（95 项）
 node ../tools/browser/check-connect.mjs   # 真机 GUI：面板真的渲染出来（需 GUI 在 19387 运行）
 ```
 

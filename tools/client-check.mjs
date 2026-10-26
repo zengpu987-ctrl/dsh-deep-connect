@@ -202,7 +202,7 @@ const settle = async (rounds = 8) => {
 const SELF = {
   deviceId: 'dev-aaaa1111', name: 'MacBook Pro',
   fingerprint: '9f2c41d7a8b34e05c6d1f0a2b3c4d5e6f70819a2b3c4d5e6f708192a3b4c5d6',
-  channelShort: '1a2b3c4d', relayUrl: 'wss://relay.example.com', connected: true, mode: 'account',
+  channelShort: '1a2b3c4d', relayUrl: 'wss://relay.example.com', connected: true, mode: 'account', shareMemory: true,
 };
 const PEER = {
   deviceId: 'dev-bbbb2222', name: 'Studio Mac', online: true, lastSeen: Date.now() - 120000,
@@ -216,14 +216,14 @@ const LOCAL_SESSION = {
   ownerId: SELF.deviceId, ownerName: SELF.name, sessionId: 'session-local-1',
   title: '本机会话：重构 Deep Connect 面板', cwd: '/Users/zp/Documents/deepseek-harness/default-workspace',
   createdAt: Date.now() - 600000, updatedAt: Date.now() - 30000, eventCount: 42,
-  userPrompts: ['先写设计', '把面板写出来'], tasks: { open: 2, done: 1, goal: '交付 client.js', team: 0 },
+  userPrompts: ['先写设计', '把面板写出来'], tasks: { open: 2, done: 1, goal: '交付 client.js', team: 0, items: [{ kind: 'todo', text: '把面板写出来', status: 'open' }, { kind: 'goal', text: '交付 client.js', status: 'open' }] },
   live: true, isRemote: false, sizeBytes: 240000,
 };
 const REMOTE_SESSION = {
   ownerId: PEER.deviceId, ownerName: PEER.name, sessionId: 'session-remote-9',
   title: 'Remote conversation about tetraquarks', cwd: '/Users/zp/work/physics',
   createdAt: Date.now() - 3600000, updatedAt: Date.now() - 300000, eventCount: 128,
-  userPrompts: ['看看这条', '继续'], tasks: { open: 0, done: 3, team: 2 }, live: false, isRemote: true, sizeBytes: 1400000,
+  userPrompts: ['看看这条', '继续'], tasks: { open: 0, done: 3, team: 2, items: [{ kind: 'team', text: 'B 机上的团队任务', status: 'done' }] }, live: false, isRemote: true, sizeBytes: 1400000,
 };
 const OFFLINE_SESSION = {
   ownerId: OFFLINE_PEER.deviceId, ownerName: OFFLINE_PEER.name, sessionId: 'session-offline-3',
@@ -366,10 +366,38 @@ check('renders the connected dot + label', first.html.includes('dc_dot_connected
 check('renders local and remote session titles', first.html.includes(LOCAL_SESSION.title) && first.html.includes(REMOTE_SESSION.title));
 check('renders task chips', first.html.includes('待办 2') && first.html.includes('完成 1') && first.html.includes('目标'));
 check('renders the last user prompt', first.html.includes(LOCAL_SESSION.userPrompts[1]));
-check('renders group headers for both owners', first.html.includes(`本机 · ${SELF.name}`) && first.html.includes(PEER.name));
+check('renders the device rail with every owner', first.html.includes('data-dc="rail"') && first.html.includes(SELF.name) && first.html.includes(PEER.name) && first.html.includes(OFFLINE_PEER.name));
+check('renders the all-devices overview', first.html.includes('全部设备'));
 check('renders the stats line', first.html.includes('本机 1 · 远端 2 · 设备 2'));
-check('uses data-dc markers', first.html.includes('data-dc="device"') && first.html.includes('data-dc="session"'));
+check('uses data-dc markers', first.html.includes('data-dc="rail"') && first.html.includes('data-dc="session"'));
 check('no effect threw', first.renderer.effectErrors().length === 0, first.renderer.effectErrors().map((e) => e?.message).join(' | '));
+
+/* ------------------------------------------------- 4b. rail + memory switch */
+const memorySwitch = find(first.tree, (node) => node.type === 'button' && node.props?.['aria-pressed'] !== undefined);
+check('the rail has a memory-sharing switch', memorySwitch !== null);
+memorySwitch?.props?.onClick({});
+await settle();
+const memoryCall = globalThis.fetch.calls.find((b) => b.action === 'configure' && b.shareMemory !== undefined);
+check('toggling the switch posts configure shareMemory', memoryCall?.shareMemory === false, JSON.stringify(memoryCall));
+
+const peerItem = find(first.tree, (node) => node.type === 'button' && node.props?.['data-device-id'] === PEER.deviceId);
+check('the rail has one clickable card per peer', peerItem !== null);
+peerItem?.props?.onClick({});
+await settle();
+const selectedHtml = serialize(first.renderer.render());
+check('selecting a device shows its command box', selectedHtml.includes('给这台设备发命令'));
+check('selecting a device narrows the list to its sessions', selectedHtml.includes(REMOTE_SESSION.title) && !selectedHtml.includes(LOCAL_SESSION.title));
+const inheritButton = find(first.renderer.render(), (node) => node.type === 'button' && textOf(node) === '继承到本机');
+check('a remote row offers inherit here', inheritButton !== null);
+inheritButton?.props?.onClick({});
+await settle();
+const inheritCall = globalThis.fetch.calls.find((b) => b.action === 'inherit');
+check('row inherit posts inherit with the owner and session', inheritCall?.deviceId === PEER.deviceId && inheritCall?.sessionId === REMOTE_SESSION.sessionId, JSON.stringify(inheritCall));
+
+/* ------------------------------------- 4c. task content + hand-off (3.0.2) */
+const taskHtml = first.html;
+check('renders the actual task content, not just counts', taskHtml.includes('把面板写出来') && taskHtml.includes('B 机上的团队任务'));
+check('task rows offer hand-off for remote work', taskHtml.includes('接力到本机'));
 
 /* ---------------------------------------------------------------- 5. reader */
 const rowClicked = (() => {

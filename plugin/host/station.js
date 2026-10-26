@@ -22,7 +22,7 @@
  */
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { access } from 'node:fs/promises';
+import { access, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -131,6 +131,62 @@ async function waitForRelay(url, timeoutMs) {
   }
 }
 
+/** Where a station records itself so it can be adopted after a restart. */
+const STATION_FILE = 'station.json';
+
+/**
+ * Adopt a station whose processes outlived the previous Harness process.
+ *
+ * That is what makes an in-place plugin update non-disruptive: the relay and the
+ * quick tunnel are spawned detached, they keep serving while the app restarts,
+ * and the new process reads this file instead of tearing everything down.
+ *
+ * @param {{root: string, log?: Function}} options - state directory and logger.
+ * @returns {Promise<RelayStation|undefined>} a live station, or undefined.
+ */
+export async function adoptStation({ root, log = () => {} }) {
+  const path = join(String(root ?? 'deep-connect'), 'station', STATION_FILE);
+  let record;
+  try {
+    record = JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    return undefined;
+  }
+  if (record === null || typeof record !== 'object' || typeof record.token !== 'string' || typeof record.localUrl !== 'string') return undefined;
+  const health = async (url) => {
+    try {
+      const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(3_000) });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
+  if (!(await health(record.localUrl))) {
+    await rm(path, { force: true }).catch(() => undefined);
+    return undefined;
+  }
+  if (record.public === true && typeof record.baseUrl === 'string') {
+    // The tunnel is cloudflared's child; if it is gone the station is LAN-only.
+    const publicOk = await health(record.baseUrl);
+    if (!publicOk) {
+      record.public = false;
+      record.baseUrl = record.lanUrl !== '' ? record.lanUrl : record.localUrl;
+    }
+  }
+  const station = new RelayStation({ root, log });
+  station.adopted = true;
+  station.token = record.token;
+  station.localUrl = record.localUrl;
+  station.baseUrl = record.baseUrl;
+  station.lanUrl = record.lanUrl ?? '';
+  station.public = record.public === true;
+  station.relayPid = Number(record.relayPid ?? 0);
+  station.tunnelPid = Number(record.tunnelPid ?? 0);
+  station.startedAt = Number(record.startedAt ?? Date.now());
+  log('info', `已接续上次的中继站：${station.baseUrl}`);
+  return station;
+}
+
 /** One running station: a relay child plus, when public, a tunnel child. */
 export class RelayStation {
   /**
@@ -150,6 +206,10 @@ export class RelayStation {
     this.lanUrl = '';
     this.error = '';
     this.startedAt = 0;
+    /** PIDs survive when this instance adopts a station it did not spawn. */
+    this.relayPid = 0;
+    this.tunnelPid = 0;
+    this.adopted = false;
   }
 
   /** The panel's read-only view of this station. */
@@ -177,6 +237,9 @@ export class RelayStation {
     const port = await freePort();
     const token = newInviteToken();
     const statePath = join(this.root, 'station', 'relay-state.json');
+    // Detached on purpose: the station must outlive this Harness process, or a
+    // plugin update would drop every peer mid-session. It is re-adopted on the
+    // next start from station.json.
     this.relay = spawn(process.execPath, [
       RELAY_PATH,
       '--host', '0.0.0.0',
@@ -184,9 +247,9 @@ export class RelayStation {
       '--state', statePath,
       '--token', token,
       '--require-proto', String(STATION_PROTOCOL),
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    this.relay.stdout?.on('data', (chunk) => this.log('debug', `station relay: ${String(chunk).trim()}`));
-    this.relay.stderr?.on('data', (chunk) => this.log('debug', `station relay: ${String(chunk).trim()}`));
+    ], { detached: true, stdio: 'ignore' });
+    this.relayPid = this.relay.pid ?? 0;
+    this.relay.unref();
     this.relay.on('exit', (code) => {
       if (this.relay !== undefined) this.log('warn', `中继站进程退出（code ${code}）`);
     });
@@ -223,6 +286,7 @@ export class RelayStation {
     }
 
     this.startedAt = Date.now();
+    await this.#persist();
     return this.describe();
   }
 
@@ -230,9 +294,11 @@ export class RelayStation {
   async #startTunnel(binary, port) {
     return new Promise((resolve) => {
       const child = spawn(binary, ['tunnel', '--url', `http://127.0.0.1:${port}`, '--no-autoupdate'], {
+        detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       this.tunnel = child;
+      this.tunnelPid = child.pid ?? 0;
       let settled = false;
       let buffer = '';
       const finish = (value) => {
@@ -266,16 +332,57 @@ export class RelayStation {
     });
   }
 
+  /** Record the station so the next process can adopt it. */
+  async #persist() {
+    const path = join(this.root, 'station', STATION_FILE);
+    try {
+      await mkdir(join(this.root, 'station'), { recursive: true });
+      await writeFile(path, JSON.stringify({
+        version: 1,
+        baseUrl: this.baseUrl,
+        localUrl: this.localUrl,
+        token: this.token,
+        public: this.public === true,
+        lanUrl: this.lanUrl,
+        relayPid: this.relayPid,
+        tunnelPid: this.tunnelPid,
+        startedAt: this.startedAt,
+      }, null, 2), { mode: 0o600 });
+    } catch (error) {
+      this.log('warn', `中继站状态写入失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   /** Stop the tunnel and the relay. Safe to call repeatedly. */
   async stop() {
-    for (const child of [this.tunnel, this.relay]) {
-      if (child === undefined) continue;
+    // An adopted station has no child handles, only pids, so both are killed.
+    for (const pid of [this.tunnelPid, this.relayPid]) {
+      if (!Number.isFinite(pid) || pid <= 0) continue;
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        /* already gone */
+      }
+    }
+    this.tunnelPid = 0;
+    this.relayPid = 0;
+    await rm(join(this.root, 'station', STATION_FILE), { force: true }).catch(() => undefined);
+    const children = [this.tunnel, this.relay].filter((child) => child !== undefined);
+    for (const child of children) {
       try {
         child.kill('SIGTERM');
       } catch {
         /* already gone */
       }
     }
+    await Promise.all(children.map((child) => new Promise((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) return resolve();
+      const timer = setTimeout(resolve, 2_000);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    })));
     this.tunnel = undefined;
     this.relay = undefined;
     this.baseUrl = '';

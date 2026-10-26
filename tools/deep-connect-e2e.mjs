@@ -143,6 +143,7 @@ function makeStubContext({ accountId, sessions, prompts, log }) {
       prompt: async (request) => {
         prompts.push(request);
       },
+      create: async () => ({ sessionId: `session-new-${prompts.length + 1}` }),
     },
   };
   const ctx = {
@@ -247,6 +248,9 @@ try {
   check(alpha.tasks.open === 1 && alpha.tasks.done === 1, 'todo counts folded from the log');
   check(alpha.tasks.team === 2 && alpha.tasks.teamDone === 1, 'team task counts folded from the log');
   check(alpha.tasks.goal === '让两台 DSH 互联', 'the goal objective folded from the log');
+  check(Array.isArray(alpha.tasks.items) && alpha.tasks.items.length >= 3, 'the task CONTENT crossed the wire, not just counts');
+  check(alpha.tasks.items.some((item) => item.text === '写测试' && item.status === 'open'), 'the open todo keeps its text and state');
+  check(alpha.tasks.items.some((item) => item.kind === 'goal' && item.text === '让两台 DSH 互联'), 'the goal appears as a task item');
 
   const remoteSessionIds = listB.sessions.filter((s) => !s.isRemote).map((s) => s.sessionId);
   check(remoteSessionIds.includes('session-gamma'), 'B still sees its own session');
@@ -471,6 +475,31 @@ try {
   check(apiA.compareVersion('3.0.0', '3.0.0') === 0, 'equal versions compare equal');
   const { pickLatestVersion } = await import('../plugin/index.js');
   check(pickLatestVersion([{ name: 'v2.0.0' }, { name: 'v3.0.1' }, { name: 'v3.0.0' }, { name: 'not-a-version' }]) === '3.0.1', 'the update check picks the highest tag, not the first');
+
+  section('v3.0.2: send a command to another DSH');
+  const taskReply = await apiB.command({ action: 'task-run', deviceId: listA.self.deviceId, text: '在 A 上跑一下统计' });
+  check(taskReply.accepted === true, 'the peer accepts a remote command');
+  check(String(taskReply.sessionId).startsWith('session-new-'), 'the command lands in a NEW session on the peer');
+  check(promptsA.some((request) => request.sessionId === taskReply.sessionId && request.content?.[0]?.text === '在 A 上跑一下统计'), 'the peer actually admits the prompt');
+
+  section('v3.0.2: memory sharing can be switched off');
+  await apiA.command({ action: 'configure', shareMemory: false });
+  await until(async () => {
+    const value = await apiB.command({ action: 'list' });
+    const peer = value.peers.find((entry) => entry.deviceId === listA.self.deviceId);
+    return peer !== undefined && peer.online === true && peer.shareMemory === false ? value : undefined;
+  }, { timeoutMs: 15000, what: 'B to see A online with sharing off' });
+  let blocked = '';
+  try {
+    await apiB.command({ action: 'inherit', deviceId: listA.self.deviceId, sessionId: 'session-alpha' });
+  } catch (error) {
+    blocked = error instanceof Error ? error.message : String(error);
+  }
+  check(blocked.includes('memory-sharing-off'), `inheritance is refused while sharing is off (${blocked})`);
+  await apiA.command({ action: 'configure', shareMemory: true });
+  await sleep(300);
+  const afterShare = await apiA.command({ action: 'list' });
+  check(afterShare.self.shareMemory === true, 'the switch reports itself back on');
 
   section('settings round-trip');
   const configured = await apiB.command({ action: 'configure', deviceName: 'B 机（改名）', secret: 'my-shared-passphrase' });

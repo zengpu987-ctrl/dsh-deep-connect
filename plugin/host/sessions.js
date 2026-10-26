@@ -25,6 +25,10 @@ const PREVIEW_CHARS = 220;
 const PREVIEW_PROMPTS = 3;
 /** Characters of a tool result kept in a transcript turn. */
 const TOOL_RESULT_CHARS = 4000;
+/** Task items carried per session in the index (enough to list, small enough to broadcast). */
+const TASK_ITEM_LIMIT = 12;
+/** Characters kept per task item. */
+const TASK_TEXT_CHARS = 120;
 /** Characters of one assistant/user turn kept in a transcript. */
 const TURN_CHARS = 200_000;
 
@@ -102,6 +106,26 @@ export function foldTasks(events) {
     if (task?.status === 'completed' || task?.state === 'completed' || task?.state === 'done') teamDone += 1;
   }
   const result = { open, done, team: teamTasks.size, teamDone };
+  // v3.0.2: the index now carries the task CONTENT, not just counts, so the
+  // other machine can render the actual to-do list and hand work over.
+  const items = [];
+  for (const todo of Array.isArray(todos) ? todos : []) {
+    if (items.length >= TASK_ITEM_LIMIT) break;
+    const text = contentToText(todo?.content ?? todo?.text ?? '').replace(/\s+/g, ' ').trim();
+    if (text === '') continue;
+    items.push({ kind: 'todo', text: clip(text, TASK_TEXT_CHARS), status: todo?.status === 'completed' ? 'done' : 'open' });
+  }
+  for (const team of teamTasks.values()) {
+    if (items.length >= TASK_ITEM_LIMIT) break;
+    const text = contentToText(team?.title ?? team?.subject ?? team?.description ?? '').replace(/\s+/g, ' ').trim();
+    if (text === '') continue;
+    const finished = team?.status === 'completed' || team?.state === 'completed' || team?.state === 'done';
+    items.push({ kind: 'team', text: clip(text, TASK_TEXT_CHARS), status: finished ? 'done' : 'open' });
+  }
+  if (goal !== undefined && items.length < TASK_ITEM_LIMIT) {
+    items.push({ kind: 'goal', text: clip(goal, TASK_TEXT_CHARS), status: goalStatus === 'done' || goalStatus === 'completed' ? 'done' : 'open' });
+  }
+  if (items.length > 0) result.items = items;
   if (goal !== undefined) {
     result.goal = clip(goal, 140);
     if (goalStatus !== undefined) result.goalStatus = goalStatus;

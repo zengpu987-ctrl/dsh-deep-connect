@@ -165,6 +165,10 @@ window.__ModuleLoader__.load({
 				error: null,
 				/** `list` | `settings` | `reader` — the main view's mode. */
 				view: 'list',
+				/** Which device the workspace is showing; '' means this machine. */
+				selectedDevice: '',
+				/** The command being typed for another device. */
+				taskDraft: '',
 				/** The reader's `{ deviceId, sessionId }`, or null. */
 				reader: null,
 				/** The last `history` payload, plus its own status and error. */
@@ -422,6 +426,31 @@ window.__ModuleLoader__.load({
 			updateUpToDate: '已是最新版本 v{current}',
 			updateUnknown: '暂时无法检查更新（{error}）',
 			updateCopy: '复制命令',
+			railTitle: '设备',
+			railHint: '点设备卡片查看它上面的任务；开关控制本机是否把对话正文共享给中继站。',
+			memoryShare: '记忆共享',
+			memoryOff: '未共享',
+			memoryOnHint: '本机对话正文会同步给同站设备，并允许它们继承。',
+			memoryOffHint: '只广播标题与任务计数，对端拉不到正文，也无法继承。',
+			tasksTitle: '任务与状态',
+			noTasks: '这台设备没有任务记录。',
+			taskOpen: '待办 {n}',
+			taskDone: '完成 {n}',
+			taskGoal: '目标 {n}',
+			taskTeam: '团队 {n}',
+			deviceCommand: '给这台设备发命令',
+			deviceCommandPlaceholder: '例如：跑一下昨天的数据统计，把结果放在桌面',
+			deviceCommandHint: '命令会在那台设备上新建一条会话，由它的 DSH 执行；本机只是看着。',
+			deviceCommandSend: '下发',
+			taskSent: '命令已下发，对方正在执行',
+			inheritRow: '继承到本机',
+			relayTask: '接力到本机',
+			taskContent: '任务内容',
+			taskRelayed: '已接力到本机会话 {id}',
+			taskMore: '还有 {n} 项',
+			deviceSessions: '会话 {n}',
+			selectDevice: '选择左侧设备查看任务',
+			allDevices: '全部设备',
 			settingsTitle: '连接设置',
 			settingsRelay: '中继地址',
 			settingsRelayHint: '例如 wss://relay.example.com，两端必须填同一个。',
@@ -546,6 +575,31 @@ window.__ModuleLoader__.load({
 			updateUpToDate: 'Up to date (v{current})',
 			updateUnknown: 'Could not check for updates ({error})',
 			updateCopy: 'Copy command',
+			railTitle: 'Devices',
+			railHint: 'Pick a device to see its tasks; the switch controls whether this machine shares conversation bodies with the station.',
+			memoryShare: 'Share memory',
+			memoryOff: 'not shared',
+			memoryOnHint: 'This machine shares conversation bodies and allows inheritance.',
+			memoryOffHint: 'Only titles and task counts are broadcast; peers cannot fetch bodies or inherit.',
+			tasksTitle: 'Tasks and status',
+			noTasks: 'This device has no task records.',
+			taskOpen: '{n} open',
+			taskDone: '{n} done',
+			taskGoal: '{n} goals',
+			taskTeam: '{n} team',
+			deviceCommand: 'Send a command to this device',
+			deviceCommandPlaceholder: 'e.g. run yesterday’s stats and drop the results on the Desktop',
+			deviceCommandHint: 'The command creates a new session on that machine and its DSH runs it; this machine only watches.',
+			deviceCommandSend: 'Send',
+			taskSent: 'Command delivered; the other machine is running it',
+			inheritRow: 'Inherit here',
+			relayTask: 'Hand off here',
+			taskContent: 'Task content',
+			taskRelayed: 'Handed off to local session {id}',
+			taskMore: '{n} more',
+			deviceSessions: '{n} sessions',
+			selectDevice: 'Pick a device on the left to see its tasks',
+			allDevices: 'All devices',
 			settingsTitle: 'Connection settings',
 			settingsRelay: 'Relay URL',
 			settingsRelayHint: 'For example wss://relay.example.com — both machines must use the same one.',
@@ -784,6 +838,7 @@ window.__ModuleLoader__.load({
 				if (typeof patch?.deviceName === 'string') body.deviceName = patch.deviceName;
 				if (typeof patch?.autoIndex === 'boolean') body.autoIndex = patch.autoIndex;
 				if (typeof patch?.autoConnect === 'boolean') body.autoConnect = patch.autoConnect;
+				if (typeof patch?.shareMemory === 'boolean') body.shareMemory = patch.shareMemory;
 				store.update((draft) => { draft.pending = true; });
 				try {
 					const value = await request(body);
@@ -906,6 +961,60 @@ window.__ModuleLoader__.load({
 				}
 			}
 
+			/** Focus one device in the workspace. */
+			function selectDevice(deviceId) {
+				store.update((draft) => { draft.selectedDevice = typeof deviceId === 'string' ? deviceId : ''; });
+			}
+
+			/** Send a free-form command to another machine's DSH. */
+			async function runTask(deviceId, text) {
+				const body = typeof text === 'string' ? text.trim() : '';
+				if (deviceId === '' || body === '') return false;
+				store.update((draft) => { draft.pending = true; draft.error = null; });
+				try {
+					const value = await request({ action: 'task-run', deviceId, text: body });
+					if (disposed) return false;
+					store.update((draft) => {
+						draft.pending = false;
+						draft.sent = { text: t('taskSent'), mode: 'system', at: Date.now() };
+					});
+					await load(true);
+					return typeof value?.sessionId === 'string';
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; draft.error = messageOf(error, t); });
+					return false;
+				}
+			}
+
+			/** Inherit one remote session straight from its row. */
+			async function inheritRow(deviceId, sessionId) {
+				if (deviceId === '' || sessionId === '') return false;
+				store.update((draft) => { draft.pending = true; draft.error = null; });
+				try {
+					const value = await request({ action: 'inherit', deviceId, sessionId });
+					if (disposed) return false;
+					const localId = String(value?.sessionId ?? '');
+					store.update((draft) => {
+						draft.pending = false;
+						draft.selectedDevice = draft.self?.deviceId ?? '';
+						draft.sent = { text: t('taskRelayed').replace('{id}', shortOf(localId, 22)), mode: 'system', at: Date.now() };
+					});
+					await load(true);
+					return true;
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; draft.error = messageOf(error, t); });
+					return false;
+				}
+			}
+
+			/** Flip this machine's memory-sharing switch. */
+			async function toggleMemory() {
+				const current = store.getSnapshot().self?.shareMemory;
+				return configure({ shareMemory: current !== true });
+			}
+
 			/** Generate a station here, then adopt the returned view. */
 			async function createStation() {
 				store.update((draft) => { draft.pending = true; draft.error = null; });
@@ -986,7 +1095,7 @@ window.__ModuleLoader__.load({
 
 			return {
 				store,
-				actions: { load, openReader, closeReader, reloadHistory, toggleSettings, configure, reconnect, sendPrompt, inheritSession, createStation, joinStation, stopStation, checkUpdate },
+				actions: { load, openReader, closeReader, reloadHistory, toggleSettings, configure, reconnect, sendPrompt, inheritSession, createStation, joinStation, stopStation, checkUpdate, selectDevice, runTask, inheritRow, toggleMemory },
 				/** Whether this controller can still publish (the poll reads it). */
 				isDisposed: () => disposed,
 				dispose() {
@@ -1152,7 +1261,7 @@ window.__ModuleLoader__.load({
 		}
 
 		/** One session row: title, meta, task chips, and the last user prompt. */
-		function SessionRow({ entry, t, onOpen }) {
+		function SessionRow({ entry, t, onOpen, onInherit }) {
 			const title = typeof entry?.title === 'string' && entry.title !== '' ? entry.title : t('nameFallback');
 			const prompts = Array.isArray(entry?.userPrompts) ? entry.userPrompts.filter((line) => typeof line === 'string' && line !== '') : [];
 			const preview = prompts.length > 0 ? prompts[prompts.length - 1] : '';
@@ -1184,6 +1293,9 @@ window.__ModuleLoader__.load({
 					() => onOpen(entry),
 					{ title: t('openReader'), 'aria-label': `${t('openReader')}: ${title}` },
 				),
+				typeof onInherit === 'function'
+					? button('dc_rowAction', t('inheritRow'), () => onInherit(entry), { title: t('inheritHint') })
+					: null,
 			);
 		}
 
@@ -1278,6 +1390,18 @@ window.__ModuleLoader__.load({
 						),
 					),
 				),
+				history === null || !Array.isArray(history?.tasks?.items) || history.tasks.items.length === 0
+					? null
+					: div(
+						'dc_readerTasks',
+						span('dc_fieldLabel', t('taskContent')),
+						span('dc_taskItems', history.tasks.items.map((item, index) => span(
+							cx('dc_taskLine', item?.status === 'done' && 'dc_taskLineDone'),
+							span('dc_taskDot'),
+							span('dc_taskText', String(item?.text ?? ''), { title: String(item?.text ?? '') }),
+							{ key: `rt:${index}` },
+						))),
+					),
 				div('dc_scroll', body),
 				div(
 					'dc_composer',
@@ -1358,7 +1482,6 @@ window.__ModuleLoader__.load({
 			const sessions = Array.isArray(state.sessions) ? state.sessions : [];
 			const peers = Array.isArray(state.peers) ? state.peers : [];
 			const stats = state.stats !== null && typeof state.stats === 'object' ? state.stats : null;
-			const groups = useMemo(() => sessionGroups(sessions, self, peers), [sessions, self, peers]);
 			// The empty state is the honest answer to "there is nothing to show":
 			// no relay configured AND nothing ever arrived. A configured but silent
 			// relay keeps the lists, which carry their own "nothing here yet" lines.
@@ -1422,25 +1545,176 @@ window.__ModuleLoader__.load({
 				onStop: () => void actions.stopStation(),
 				onCheckUpdate: (force) => void actions.checkUpdate(force),
 			});
-			const groupsView = groups.map((group) => h(
-				'section',
-				{ className: 'dc_section', key: `group:${group.deviceId}`, 'data-dc': 'group' },
-				h(
-					'h2',
-					{ className: 'dc_sectionTitle' },
-					group.isRemote ? group.name : `${t('thisDevice')} · ${group.name}`,
-					span(cx('dc_badge', group.online && 'dc_badgeOk'), group.online ? t('online') : t('offline')),
-					span('dc_sectionCount', String(group.sessions.length)),
+			// ---- v3.0.2 workspace: device rail on the left, tasks on the right ----
+			const deviceList = [
+				{
+					deviceId: typeof self?.deviceId === 'string' ? self.deviceId : '',
+					name: deviceName,
+					online: true,
+					isRemote: false,
+					shareMemory: self?.shareMemory !== false,
+					sessionCount: sessions.filter((row) => row.isRemote !== true).length,
+				},
+				...peers.map((peer) => ({
+					deviceId: String(peer?.deviceId ?? ''),
+					name: typeof peer?.name === 'string' && peer.name !== '' ? peer.name : String(peer?.deviceId ?? '').slice(0, 8),
+					online: peer?.online === true,
+					isRemote: true,
+					shareMemory: peer?.shareMemory !== false,
+					lastSeen: Number(peer?.lastSeen ?? 0),
+					sessionCount: sessions.filter((row) => row.ownerId === peer?.deviceId).length,
+				})),
+			];
+			// '' means the overview: every device's sessions in one list. Clicking a
+			// device card narrows it to that machine's tasks.
+			const selectedDevice = state.selectedDevice === ''
+				? null
+				: deviceList.find((device) => device.deviceId === state.selectedDevice) ?? null;
+			const selectedSessions = selectedDevice === null
+				? sessions
+				: sessions.filter((row) => String(row?.ownerId ?? '') === selectedDevice.deviceId);
+			const taskTotals = selectedSessions.reduce((total, row) => {
+				const tasks = row?.tasks !== null && typeof row?.tasks === 'object' ? row.tasks : {};
+				total.open += Number(tasks.open ?? 0);
+				total.done += Number(tasks.done ?? 0);
+				if (tasks.goal !== undefined && tasks.goal !== '') total.goal += 1;
+				total.team += Number(tasks.team ?? 0);
+				return total;
+			}, { open: 0, done: 0, goal: 0, team: 0 });
+			const rail = h(
+				'aside',
+				{ className: 'dc_rail', 'data-dc': 'rail' },
+				h('h2', { className: 'dc_railTitle' }, t('railTitle')),
+				span(
+					'dc_memory',
+					span('dc_memoryLabel', t('memoryShare')),
+					button(
+						cx('dc_switch', self?.shareMemory !== false && 'dc_switchOn'),
+						span('dc_switchKnob'),
+						() => void actions.toggleMemory(),
+						{ 'aria-pressed': self?.shareMemory !== false, title: self?.shareMemory !== false ? t('memoryOnHint') : t('memoryOffHint') },
+					),
+					span('dc_fieldHint', self?.shareMemory !== false ? t('memoryOnHint') : t('memoryOffHint')),
 				),
-				group.sessions.length === 0
-					? para('dc_empty', t('groupEmpty'))
-					: list('dc_rows', null, group.sessions.map((entry) => el(SessionRow, {
-						key: `row:${group.deviceId}:${entry?.sessionId ?? ''}`,
-						entry,
-						t,
-						onOpen: actions.openReader,
-					}))),
-			));
+				list(
+					'dc_devices',
+					'device',
+					[h(
+						'li',
+						{ key: 'dev:all', className: 'dc_devItemWrap' },
+						button(
+							cx('dc_devItem', state.selectedDevice === '' && 'dc_devItemOn'),
+							[
+								span('dc_devDot dc_devDotOn'),
+								span('dc_devName', t('allDevices')),
+								span('dc_devMeta', t('deviceSessions').replace('{n}', String(count(sessions.length)))),
+							],
+							() => actions.selectDevice(''),
+							{ 'data-device-id': '', title: t('allDevices') },
+						),
+					)].concat(deviceList.map((device) => h(
+						'li',
+						{ key: `dev:${device.deviceId}`, className: 'dc_devItemWrap' },
+						button(
+							cx('dc_devItem', device.deviceId === selectedDevice?.deviceId && 'dc_devItemOn', device.online && 'dc_devItemOnline'),
+							[
+								span(cx('dc_devDot', device.online ? 'dc_devDotOn' : 'dc_devDotOff')),
+								span('dc_devName', device.name, { title: device.name }),
+								span('dc_devMeta', t('deviceSessions').replace('{n}', String(count(device.sessionCount)))),
+								device.isRemote === false ? span('dc_badge', t('thisDevice')) : null,
+								device.shareMemory === false ? span('dc_badge dc_badgeWarn', t('memoryOff')) : null,
+							],
+							() => actions.selectDevice(device.deviceId),
+							{ 'data-device-id': device.deviceId, title: device.name },
+						),
+					))),
+				),
+			);
+			const selectedGroups = h(
+					'section',
+					{ className: 'dc_section dc_detail', key: `detail:${selectedDevice?.deviceId ?? 'all'}`, 'data-dc': 'detail' },
+					h(
+						'h2',
+						{ className: 'dc_sectionTitle' },
+						selectedDevice === null ? t('allDevices') : selectedDevice.name,
+						selectedDevice === null ? null : span(cx('dc_badge', selectedDevice.online && 'dc_badgeOk'), selectedDevice.online ? t('online') : t('offline')),
+						selectedDevice?.isRemote === false ? span('dc_badge', t('thisDevice')) : null,
+						selectedDevice?.shareMemory === false ? span('dc_badge dc_badgeWarn', t('memoryOff')) : null,
+					),
+					div(
+						'dc_taskBoard',
+						span('dc_taskChips',
+							span('dc_chip dc_chipOpen', t('taskOpen').replace('{n}', String(taskTotals.open))),
+							span('dc_chip dc_chipDone', t('taskDone').replace('{n}', String(taskTotals.done))),
+							taskTotals.goal > 0 ? span('dc_chip', t('taskGoal').replace('{n}', String(taskTotals.goal))) : null,
+							taskTotals.team > 0 ? span('dc_chip', t('taskTeam').replace('{n}', String(taskTotals.team))) : null,
+						),
+					),
+					selectedSessions.filter((row) => Array.isArray(row?.tasks?.items) && row.tasks.items.length > 0).length === 0
+						? null
+						: list(
+							'dc_taskList',
+							'task',
+							selectedSessions.filter((row) => Array.isArray(row?.tasks?.items) && row.tasks.items.length > 0).map((row) => h(
+								'li',
+								{ className: 'dc_taskItem', key: `task:${row.sessionId}` },
+								span('dc_taskHead',
+									span('dc_taskTitle', String(row.title ?? row.sessionId ?? ''), { title: String(row.title ?? '') }),
+									String(row.ownerId ?? '') !== String(self?.deviceId ?? '')
+										? button('dc_link', t('relayTask'), () => void actions.inheritRow(String(row.ownerId ?? ''), String(row.sessionId ?? '')), { disabled: state.pending === true })
+										: null,
+								),
+								span('dc_taskItems',
+									(row.tasks.items ?? []).map((item, index) => span(
+										cx('dc_taskLine', item?.status === 'done' && 'dc_taskLineDone'),
+										span('dc_taskDot'),
+										span('dc_taskText', String(item?.text ?? ''), { title: String(item?.text ?? '') }),
+										{ key: `item:${index}` },
+									)),
+								),
+							)),
+						),
+					selectedDevice?.isRemote === true
+						? div(
+							'dc_command',
+							span('dc_fieldLabel', t('deviceCommand')),
+							div(
+								'dc_commandRow',
+								h('input', {
+									className: 'dc_input', type: 'text', value: state.taskDraft ?? '',
+									placeholder: t('deviceCommandPlaceholder'),
+									'aria-label': t('deviceCommand'),
+									onChange: (event) => store.update((draft) => { draft.taskDraft = event.target.value; }),
+								}),
+								button('dc_primary', state.pending === true ? t('sending') : t('deviceCommandSend'), () => {
+									const text = String(store.getSnapshot().taskDraft ?? '').trim();
+									if (text === '') return;
+									void actions.runTask(selectedDevice.deviceId, text).then((ok) => {
+										if (ok) store.update((draft) => { draft.taskDraft = ''; });
+									});
+								}, { disabled: state.pending === true || String(state.taskDraft ?? '').trim() === '' }),
+							),
+							span('dc_fieldHint', t('deviceCommandHint')),
+						)
+						: null,
+					selectedSessions.length === 0
+						? para('dc_empty', t('groupEmpty'))
+						: list('dc_rows', null, selectedSessions.map((entry) => el(SessionRow, {
+							key: `row:${selectedDevice?.deviceId ?? entry?.ownerId ?? ''}:${entry?.sessionId ?? ''}`,
+							entry,
+							t,
+							onOpen: actions.openReader,
+							onInherit: (selectedDevice === null ? entry.isRemote === true : selectedDevice.isRemote === true && selectedDevice.shareMemory !== false)
+								? (row) => void actions.inheritRow(String(row?.ownerId ?? selectedDevice?.deviceId ?? ''), String(row?.sessionId ?? ''))
+								: null,
+						}))),
+				);
+			const workspace = h(
+				'div',
+				{ className: 'dc_workspace' },
+				rail,
+				h('main', { className: 'dc_main', 'data-dc': 'main' }, selectedGroups),
+			);
 
 			if (state.view === 'reader') {
 				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, el(ReaderView, { t, state, onBack: actions.closeReader, onSend: actions.sendPrompt, onInherit: actions.inheritSession }));
@@ -1466,28 +1740,16 @@ window.__ModuleLoader__.load({
 				{ className: 'dc_root', 'data-dc': 'panel' },
 				header,
 				errorLine,
-				div(
-					'dc_scroll',
-					stats === null ? null : para('dc_note', t('statsLine')
-						.replace('{local}', String(count(stats.local)))
-						.replace('{remote}', String(count(stats.remote)))
-						.replace('{peers}', String(count(stats.peers ?? peers.length)))),
-					state.view === 'settings' ? settings : null,
-					h(
-						'section',
-						{ className: 'dc_section' },
-						h('h2', { className: 'dc_sectionTitle' }, t('devices'), span('dc_sectionCount', String(peers.length))),
-						peers.length === 0
-							? para('dc_empty', t('devicesEmpty'))
-							: list('dc_devices', 'devices', peers.map((peer) => el(DeviceCard, { key: String(peer?.deviceId ?? ''), peer, t }))),
+				state.view === 'settings'
+					? div('dc_scroll', settings)
+					: div(
+						'dc_body',
+						stats === null ? null : para('dc_note dc_bodyNote', t('statsLine')
+							.replace('{local}', String(count(stats.local)))
+							.replace('{remote}', String(count(stats.remote)))
+							.replace('{peers}', String(count(stats.peers ?? peers.length)))),
+						workspace,
 					),
-					h(
-						'section',
-						{ className: 'dc_section' },
-						h('h2', { className: 'dc_sectionTitle' }, t('sessions'), span('dc_sectionCount', String(sessions.length))),
-						sessions.length === 0 ? para('dc_empty', t('sessionsEmpty')) : groupsView,
-					),
-				),
 			);
 		}
 
@@ -1561,20 +1823,27 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * Sidebar icon: a globe with a link arc across it, sized by the sidebar.
+		 * Sidebar icon: one computer linked to another. Two monitors side by side,
+		 * joined by a dashed line with a lock dot in the middle.
 		 * @param props - the sidebar's `size` and `active` flag.
 		 */
 		function PanelIcon({ size, active }) {
 			const edge = Number.isFinite(size) && size > 0 ? size : 20;
 			const width = active === true ? 1.7 : 1.4;
+			const stroke = 'currentColor';
 			return svg(
 				'svg',
 				{ width: edge, height: edge, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': 'true', style: { display: 'block' } },
-				// The globe: one circle, a meridian, and the equator.
-				svg('circle', { cx: 12, cy: 12, r: 8.4, stroke: 'currentColor', strokeWidth: width }),
-				svg('path', { d: 'M3.6 12h16.8M12 3.6c2.4 2.4 3.6 5.3 3.6 8.4S14.4 18 12 20.4C9.6 18 8.4 15.1 8.4 12S9.6 6 12 3.6Z', stroke: 'currentColor', strokeWidth: width * 0.8, strokeLinecap: 'round' }),
-				// The link: two interlocking arcs, so the glyph reads as "connected".
-				svg('path', { d: 'M14.6 16.9a3.1 3.1 0 0 1 0-4.4l1.7-1.7a3.1 3.1 0 0 1 4.4 4.4l-.6.6M9.4 7.1a3.1 3.1 0 0 1 0 4.4l-1.7 1.7a3.1 3.1 0 0 1-4.4-4.4l.6-.6', stroke: 'currentColor', strokeWidth: width, strokeLinecap: 'round' }),
+				// Left machine: screen, neck, stand.
+				svg('rect', { x: 1.4, y: 5.2, width: 8.2, height: 6.2, rx: 1.1, stroke, strokeWidth: width }),
+				svg('path', { d: 'M6 11.4v3.2M3.1 14.6h5.8', stroke, strokeWidth: width, strokeLinecap: 'round' }),
+				// Right machine.
+				svg('rect', { x: 14.4, y: 5.2, width: 8.2, height: 6.2, rx: 1.1, stroke, strokeWidth: width }),
+				svg('path', { d: 'M19 11.4v3.2M16.1 14.6h5.8', stroke, strokeWidth: width, strokeLinecap: 'round' }),
+				// The link: a dashed line with the lock dot in the middle.
+				svg('path', { d: 'M9.7 8.3h4.6', stroke, strokeWidth: width, strokeLinecap: 'round', strokeDasharray: '1.4 1.3' }),
+				svg('circle', { cx: 12, cy: 8.3, r: 1.7, fill: stroke }),
+				svg('path', { d: 'M2.2 18.2h19.6', stroke, strokeWidth: width * 0.8, strokeLinecap: 'round', opacity: 0.45 }),
 			);
 		}
 		//#endregion
@@ -1626,7 +1895,15 @@ window.__ModuleLoader__.load({
 			'.dc_composer{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-xl);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:8px;flex:none;padding:10px 12px;display:flex}.dc_textarea{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);resize:vertical;width:100%;min-height:64px;outline:0;padding:7px 10px;font:inherit;font-size:13px;line-height:20px}.dc_textarea::placeholder{color:var(--dsw-alias-label-caption)}.dc_textarea:disabled{opacity:.55;cursor:not-allowed}',
 			'.dc_textarea:focus{border-color:var(--dsw-alias-border-l3)}.dc_composerRow{justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;display:flex}.dc_composerActions{align-items:center;gap:8px;flex:none;display:flex}.dc_sent{color:var(--dsw-alias-state-success-primary);font-size:11.5px;line-height:16px}',
 			'.dc_ghost:focus-visible,.dc_primary:focus-visible,.dc_link:focus-visible,.dc_iconBtn:focus-visible,.dc_rowOpen:focus-visible,.dc_turnHead:focus-visible,.dc_input:focus-visible,.dc_textarea:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:2px}',
-			'@media (max-width:720px){.dc_factValue{max-width:60vw}.dc_head{flex-wrap:wrap}}',
+			// v3.0.2 workspace: a device rail on the left, tasks on the right.
+			'.dc_body{flex-direction:column;min-height:0;flex:1;display:flex}.dc_bodyNote{flex:none;margin:0 20px 6px}.dc_workspace{min-height:0;flex:1;gap:0;display:flex}.dc_rail{flex:none;width:216px;border-right:.5px solid var(--dsw-alias-border-l1);flex-direction:column;gap:8px;padding:10px 12px;display:flex;overflow:auto}',
+			'.dc_railTitle{color:var(--dsw-alias-label-caption);text-transform:uppercase;letter-spacing:.04em;margin:0 0 2px;font-size:11px;font-weight:500;line-height:16px}.dc_memory{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:4px;padding:8px 10px;display:flex}.dc_memoryLabel{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}',
+			'.dc_switch{border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer;flex:none;width:34px;height:20px;padding:2px;display:flex;align-items:center;transition:background .15s}.dc_switchKnob{background:var(--dsw-alias-label-primary-inverted, var(--dsw-alias-bg-base));border-radius:999px;width:16px;height:16px;transition:transform .15s;display:block}.dc_switchOn{background:var(--dsw-alias-state-success-primary)}.dc_switchOn .dc_switchKnob{transform:translateX(14px)}',
+			'.dc_devices{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.dc_devItemWrap{margin:0;padding:0}.dc_devItem{width:100%;border:.5px solid transparent;border-radius:var(--dsw-radius-lg);background:0 0;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;align-items:center;gap:7px;padding:7px 9px;font:inherit;font-size:12.5px;line-height:18px;display:flex}.dc_devItem:hover{background:var(--dsw-alias-interactive-bg-hover)}.dc_devItemOn{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-interactive-bg-active,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-primary)}.dc_devDot{border-radius:999px;flex:none;width:8px;height:8px;background:var(--dsw-alias-label-caption)}.dc_devDotOn{background:var(--dsw-alias-state-success-primary)}.dc_devDotOff{background:var(--dsw-alias-state-error-primary)}.dc_devName{text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;overflow:hidden}.dc_devMeta{color:var(--dsw-alias-label-caption);flex:none;font-size:10.5px}',
+			'.dc_main{min-width:0;flex:1;padding:10px 16px;overflow:auto}.dc_detail{gap:6px}.dc_taskBoard{flex-wrap:wrap;gap:6px;display:flex}.dc_taskChips{flex-wrap:wrap;gap:6px;display:flex}.dc_chipOpen{color:var(--dsw-alias-state-warn-primary)}.dc_chipDone{color:var(--dsw-alias-state-success-primary)}.dc_badgeWarn{color:var(--dsw-alias-state-warn-primary)}',
+			'.dc_taskList{flex-direction:column;gap:6px;margin:8px 0 10px;padding:0;list-style:none;display:flex}.dc_taskItem{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:3px;padding:8px 10px;display:flex}.dc_taskHead{align-items:center;gap:8px;display:flex}.dc_taskTitle{color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;font-size:12px;line-height:18px;overflow:hidden}.dc_taskItems{flex-direction:column;gap:2px;display:flex}.dc_taskLine{align-items:center;gap:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;display:flex}.dc_taskLineDone{color:var(--dsw-alias-label-caption);text-decoration:line-through}.dc_taskDot{border-radius:999px;background:var(--dsw-alias-state-warn-primary);flex:none;width:6px;height:6px}.dc_taskLineDone .dc_taskDot{background:var(--dsw-alias-state-success-primary)}.dc_taskText{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.dc_readerTasks{border-top:.5px solid var(--dsw-alias-border-l1);flex-direction:column;gap:4px;margin:8px 20px 0;padding-top:8px;display:flex}',
+			'.dc_command{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:6px;margin:6px 0 10px;padding:10px}.dc_commandRow{flex-direction:row;gap:8px;display:flex}.dc_rowAction{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:0 0;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;align-self:center;margin-right:8px;padding:4px 8px;font:inherit;font-size:11px;line-height:16px}.dc_rowAction:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+			'@media (max-width:720px){.dc_factValue{max-width:60vw}.dc_head{flex-wrap:wrap}.dc_rail{width:168px}.dc_workspace{flex-direction:column}.dc_rail{border-right:0;border-bottom:.5px solid var(--dsw-alias-border-l1);width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.dc_devices{flex-direction:row;flex-wrap:wrap}}',
 		].join('');
 		//#endregion
 
