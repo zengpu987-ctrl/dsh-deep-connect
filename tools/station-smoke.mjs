@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { RelayStation, adoptStation, parseStationLink, stationLink, findCloudflared, lanAddress } from '../plugin/host/station.js';
+import { PLUGIN_VERSION } from '../plugin/host/version.js';
 
 const failures = [];
 const check = (condition, label, extra = '') => {
@@ -47,8 +48,10 @@ try {
   check(unauth.status === 401, 'the relay requires the invite token');
   const v2 = await fetch(`${local}/v1/devices?channel=${'a'.repeat(64)}&token=${lan.token}`);
   check(v2.status === 426, 'a v2 client is refused with 426');
-  const v3 = await fetch(`${local}/v1/devices?channel=${'a'.repeat(64)}&proto=3&token=${lan.token}`);
-  check(v3.ok, 'a v3 client with the token is admitted');
+  const oldVersion = await fetch(`${local}/v1/devices?channel=${'a'.repeat(64)}&proto=3&ver=4.0.1&token=${lan.token}`);
+  check(oldVersion.status === 426, 'a client below the 4.0.2 floor is refused');
+  const v3 = await fetch(`${local}/v1/devices?channel=${'a'.repeat(64)}&proto=3&ver=${PLUGIN_VERSION}&token=${lan.token}`);
+  check(v3.ok, 'a current-version client with the token is admitted');
 
   console.log('\ninvite links');
   const link = stationLink(lan.baseUrl, lan.token);

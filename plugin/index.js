@@ -1198,12 +1198,14 @@ export function apply(ctx, config) {
         // when its (eventCount, updatedAt) no longer match the peer's index row.
         const document = await store.getRemoteIndex(deviceId);
         const row = (document?.entries ?? []).find((entry) => String(entry.sessionId) === sessionId);
-        const fresh =
+        const upToDate =
           cached !== undefined &&
           row !== undefined &&
           Number(cached.eventCount ?? 0) === Number(row.eventCount ?? 0) &&
           Number(cached.updatedAt ?? 0) === Number(row.updatedAt ?? 0);
-        if (!fresh) {
+        // A live reader asks for a fresh copy every couple of seconds; the index
+        // may lag a full interval, so the cache comparison is skipped then.
+        if (body.fresh === true || !upToDate) {
           const reply = await askPeer(deviceId, { need: KIND.history, sessionId });
           if (reply !== undefined && reply.error === undefined) {
             await acceptIndexHistory(deviceId, reply);
@@ -1424,8 +1426,16 @@ export function apply(ctx, config) {
           settings.stationRole = '';
           settings.relayUrl = '';
           settings.token = '';
-          state.stationError = '本机上次生成的中继站已经不在了：请重新生成，并把新链接发给其他设备';
+          state.stationError = '正在自动重建中继站（重启后公网地址会变，需要把新链接发给其它设备）';
           await store.setConfig({ stationUrl: '', stationToken: '', stationRole: '', relayUrl: '', token: '' }).catch(() => undefined);
+          // Re-host without asking: a dead station after a reboot or a crash
+          // should not force the user to click. The public address changes for
+          // quick tunnels, so the panel says a new link must be shared.
+          setTimeout(() => {
+            void createStation(true).catch((error) =>
+              log('warn', `自动重建中继站失败：${error instanceof Error ? error.message : String(error)}`),
+            );
+          }, 2_000).unref?.();
         }
       } else if (settings.stationToken !== '') {
         settings.relayUrl = settings.stationUrl;

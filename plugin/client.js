@@ -341,7 +341,7 @@ function compareVersions(a, b) {
 		};
 		/** Dictionary keys of the transcript's turn roles (anything else is `system`). */
 		const ROLE_KEYS = {
-			user: 'roleUser', assistant: 'roleAssistant', tool: 'roleTool', developer: 'roleDeveloper',
+			user: 'roleUser', assistant: 'roleAssistant', tool: 'roleTool', call: 'roleCall', developer: 'roleDeveloper', system: 'roleSystem',
 		};
 		//#endregion
 
@@ -395,6 +395,7 @@ function compareVersions(a, b) {
 			roleUser: '用户',
 			roleAssistant: '助手',
 			roleTool: '工具',
+			roleCall: '调用',
 			roleSystem: '系统',
 			roleDeveloper: '开发者',
 			gateTitle: '此版本已封停',
@@ -567,6 +568,7 @@ function compareVersions(a, b) {
 			roleUser: 'User',
 			roleAssistant: 'Assistant',
 			roleTool: 'Tool',
+			roleCall: 'Call',
 			roleSystem: 'System',
 			roleDeveloper: 'Developer',
 			gateTitle: 'This version is sealed',
@@ -817,15 +819,18 @@ function compareVersions(a, b) {
 			}
 
 			/** Ask the Host for one conversation's full transcript. */
-			async function loadHistory(deviceId, sessionId) {
+			async function loadHistory(deviceId, sessionId, options = {}) {
 				if (disposed || typeof deviceId !== 'string' || deviceId === '' || typeof sessionId !== 'string' || sessionId === '') return;
-				store.update((draft) => {
-					draft.historyStatus = 'loading';
-					draft.historyError = null;
-					draft.history = null;
-				});
+				const silent = options.silent === true;
+				if (!silent) {
+					store.update((draft) => {
+						draft.historyStatus = 'loading';
+						draft.historyError = null;
+						draft.history = null;
+					});
+				}
 				try {
-					const value = await request({ action: 'history', deviceId, sessionId });
+					const value = await request({ action: 'history', deviceId, sessionId, ...(options.fresh === true ? { fresh: true } : {}) });
 					if (disposed) return;
 					// The reader may have moved on while this was in flight.
 					const current = store.getSnapshot().reader;
@@ -862,9 +867,9 @@ function compareVersions(a, b) {
 			}
 
 			/** Refetch the open reader's transcript (used after a successful send). */
-			function reloadHistory() {
+			function reloadHistory(fresh) {
 				const reader = store.getSnapshot().reader;
-				return reader === null ? Promise.resolve() : loadHistory(reader.deviceId, reader.sessionId);
+				return reader === null ? Promise.resolve() : loadHistory(reader.deviceId, reader.sessionId, { fresh: fresh === true, silent: fresh === true });
 			}
 
 			/** Leave the reader for the session list. */
@@ -1434,7 +1439,7 @@ function compareVersions(a, b) {
 		function Turn({ turn, t, open, onToggle }) {
 			const role = typeof turn?.role === 'string' ? turn.role : 'system';
 			const time = span('dc_turnTime', formatRelativeTime(turn?.time, t));
-			if (role !== 'tool') {
+			if (role !== 'tool' && role !== 'call') {
 				return h(
 					'li',
 					{ className: `dc_turn dc_turn_${role}`, 'data-dc': 'turn' },
@@ -1443,12 +1448,13 @@ function compareVersions(a, b) {
 				);
 			}
 			const name = typeof turn?.toolName === 'string' && turn.toolName !== '' ? t('toolName').replace('{name}', turn.toolName) : '';
+			const roleLabel = role === 'call' ? t('roleCall') : t('roleTool');
 			return h(
 				'li',
 				{ className: cx('dc_turn dc_turnTool', turn?.isError === true && 'dc_turnError'), 'data-dc': 'turn' },
 				button(
 					'dc_turnHead',
-					[span('dc_turnRole', t('roleTool')), name === '' ? null : span('dc_mono dc_turnToolName', name), time, span('dc_turnChevron', open ? '▾' : '▸')],
+					[span('dc_turnRole', roleLabel), name === '' ? null : span('dc_mono dc_turnToolName', name), time, span('dc_turnChevron', open ? '▾' : '▸')],
 					() => onToggle(),
 					{ 'aria-expanded': open ? 'true' : 'false', title: open ? t('collapseTurn') : t('expandTurn') },
 				),
@@ -1612,7 +1618,10 @@ function compareVersions(a, b) {
 				if (state.view !== 'reader' || state.reader === null) return undefined;
 				const remote = state.reader.deviceId !== state.self?.deviceId;
 				if (!remote || typeof window === 'undefined' || typeof window.setInterval !== 'function') return undefined;
-				const timer = window.setInterval(() => { void actions.reloadHistory(); }, 2500);
+				const timer = window.setInterval(() => {
+					if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+					void actions.reloadHistory(true);
+				}, 2500);
 				return () => window.clearInterval(timer);
 			}, [state.view, state.reader, state.self, actions]);
 

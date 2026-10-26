@@ -237,6 +237,7 @@ const HISTORY_VALUE = {
     { seq: 1, role: 'user', time: Date.now() - 300000, text: 'Hello from the other machine' },
     { seq: 2, role: 'assistant', time: Date.now() - 290000, text: 'Reading the event log now.' },
     { seq: 3, role: 'tool', time: Date.now() - 280000, toolName: 'Read', text: 'file contents' },
+    { seq: 5, role: 'call', kind: 'trajectory', time: Date.now() - 260000, toolName: 'Bash', text: '{"command":"ls"}' },
     { seq: 4, role: 'tool', time: Date.now() - 270000, toolName: 'Bash', text: 'exit code 1', isError: true },
   ],
   eventCount: 128, fetchedAt: Date.now(), fromCache: false,
@@ -426,6 +427,7 @@ trajectoryTab?.props?.onClick({});
 await settle();
 const trajectoryHtml = serialize(first.renderer.render());
 check('trajectory pane shows tool calls with their names', trajectoryHtml.includes('工具：Read') && trajectoryHtml.includes('工具：Bash'), trajectoryHtml.slice(0, 200));
+check('a tool CALL has its own labelled row', trajectoryHtml.includes('调用') && trajectoryHtml.includes('工具：Bash'), trajectoryHtml.slice(0, 200));
 check('trajectory pane marks the error turn', trajectoryHtml.includes('dc_turnError'));
 check('reader has 返回 and the composer buttons', readerHtml.includes('返回') && readerHtml.includes('发送') && readerHtml.includes('插话'));
 
@@ -447,6 +449,15 @@ check('prompt posts mode=queue with the text', promptCall?.mode === 'queue' && p
 check('send refetches the history', globalThis.fetch.calls.filter((b) => b.action === 'history').length >= 2);
 readerTree = first.renderer.render();
 check('transient confirmation shown', serialize(readerTree).includes('已排队'));
+const liveTextarea2 = find(first.renderer.render(), (n) => n.type === 'textarea');
+liveTextarea2?.props.onChange({ target: { value: '插一句' } });
+first.renderer.render();
+const steerButton = find(first.renderer.render(), (node) => node.type === 'button' && textOf(node) === '插话' && node.props.disabled !== true);
+steerButton?.props?.onClick({});
+await settle();
+const steerCall = globalThis.fetch.calls.find((b) => b.action === 'prompt' && b.mode === 'steer');
+check('插话 posts mode=steer', steerCall?.text === '插一句' && steerCall?.deviceId === PEER.deviceId, JSON.stringify(steerCall));
+
 
 /* ---------------------------------------------------------------- 6. offline */
 const offline = await renderPanel(makeFetch());
@@ -508,6 +519,14 @@ installButton?.props?.onClick({});
 await settle();
 check('the update button installs instead of copying a command', globalThis.fetch.calls.some((call) => call.action === 'update-install'), JSON.stringify(globalThis.fetch.calls.slice(-3)));
 check('settings offers phone access', settingsHtml.includes('手机管理') && settingsHtml.includes('开启手机管理'));
+
+/* ------------------------------------------------ 7b2. phone QR (4.0.0) */
+const withPhone = await renderPanel(makeFetch({ listValue: { ...LIST_VALUE, mobile: { enabled: true, url: 'https://abc.trycloudflare.com/m/tok123/', public: true } } }));
+const phoneSettingsButton = find(withPhone.tree, (node) => node.type === 'button' && textOf(node) === '设置');
+phoneSettingsButton?.props?.onClick({});
+await settle();
+const phoneHtml = serialize(withPhone.renderer.render());
+check('settings shows a scannable QR for phone access', phoneHtml.includes('api.qrserver.com') && phoneHtml.includes(encodeURIComponent('https://abc.trycloudflare.com/m/tok123/')), phoneHtml.slice(0, 200));
 
 /* ------------------------------------------- 7c. sealed below the 4.0.2 floor */
 const sealedList = { ...LIST_VALUE, version: '4.0.1', minVersion: '4.0.2' };
