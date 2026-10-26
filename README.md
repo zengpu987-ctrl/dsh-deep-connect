@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.0/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.1/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -69,7 +69,7 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.0/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.1/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -92,6 +92,31 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.0/in
 
 想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
 在面板里改填那条地址即可，协议与中继站完全一样。
+
+---
+
+## v4.0.1：修复自动检查更新
+
+原来的检查更新用 `fetch` 直连 GitHub，而 DSH 宿主进程常带 `NODE_USE_ENV_PROXY=1`：
+Node 会把 fetch 交给代理，代理到 `api.github.com` 的 TLS 经常被重置（`ECONNRESET`），
+于是「检查更新」一直失败；GitHub 匿名 API 每小时 60 次的限流也会让 403 长期挂着。
+
+4.0.1 把检查改成**多传输链**（[net.js](plugin/net.js)）：
+
+1. **jsDelivr 包 API**（CDN，无匿名限流，列出同一批 tag）——首选；
+2. **`node:https` 直连 GitHub tags**（绕过 fetch 的代理逻辑）；
+3. **curl**（机器确实需要代理时兜底）；
+4. `fetch`（最后）。
+
+另外三处修正：
+
+- **失败不再压 6 小时**：检查失败后 10 分钟重试；成功才推到 6 小时后。
+- **每 30 分钟巡检一次**：`ctx.interval` 周期性调用，面板轮询自然看到新版本。
+- **下载也走同一套**：`httpsDownload` 直连 codeload，失败依次退 ghproxy / gh-proxy，最后 curl；
+  全部失败才报错，并把每条路线的错误一起显示。
+
+实测（本机，GitHub API 已被限流 403）：检查经 jsDelivr 返回 `latest=4.0.0`，`transport=jsdelivr`；
+`codeload` 直连下载 4.6 MB 成功。
 
 ---
 

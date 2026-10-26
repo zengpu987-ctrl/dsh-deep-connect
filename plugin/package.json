@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-deep-connect",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "private": true,
   "description": "Deep Connect Pro for the DeepSeek Harness Web UI: one click creates a relay station, other devices join with the invite link, and peers share conversations, task boards and full bodies through an end-to-end encrypted relay that only sees a hashed channel and ciphertext.",
   "type": "module",

@@ -31,8 +31,9 @@ import { SessionAdapter } from './host/sessions.js';
 import { createInheritedSession } from './host/inherit.js';
 import { RelayStation, adoptStation, openTunnel, parseStationLink, stationLink, findCloudflared, lanAddress } from './host/station.js';
 import { MobileGateway } from './host/mobile.js';
+import { httpsGetJson, httpsDownload, curlGet } from './host/net.js';
 import { spawn } from 'node:child_process';
-import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_VERSION } from './host/crypto.js';
@@ -40,7 +41,7 @@ import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_
 export const name = 'deep-connect';
 
 /** The version shown in the panel and compared against GitHub releases. */
-export const PLUGIN_VERSION = '4.0.0';
+export const PLUGIN_VERSION = '4.0.1';
 /** GitHub repository the updater asks about. */
 const UPDATE_REPO = 'zengpu987-ctrl/dsh-deep-connect';
 /** Check at most this often unless the user asks explicitly. */
@@ -177,6 +178,7 @@ export function apply(ctx, config) {
     peerShareMemory: new Map(),
     updateInfo: undefined,
     updateCheckedAt: 0,
+    nextUpdateCheckAt: 0,
     started: false,
   };
 
@@ -790,43 +792,139 @@ export function apply(ctx, config) {
 
   /* compareVersion lives at module scope so the update logic is testable. */
 
-  /** Ask GitHub for the latest release. Never throws: the panel answers "unknown". */
+  /**
+   * Ask GitHub (and jsDelivr) for the newest version.
+   *
+   * Three transports, because the network this runs on is the whole problem:
+   *   1. `node:https` direct — ignores proxy env, which is what breaks fetch;
+   *   2. jsDelivr's package API — a different host entirely;
+   *   3. curl — honours the proxy if the machine genuinely needs one.
+   * A failed check never throws and never pushes the next attempt six hours out.
+   */
   async function checkUpdate(force) {
     const persisted = store.getConfig();
-    const last = Math.max(state.updateCheckedAt, Number(persisted.lastUpdateCheckAt ?? 0));
-    if (!force && state.updateInfo !== undefined && Date.now() - last < UPDATE_INTERVAL_MS) return state.updateInfo;
+    const now = Date.now();
+    if (!force && state.updateInfo !== undefined && now < state.nextUpdateCheckAt) return state.updateInfo;
     const info = {
       current: PLUGIN_VERSION,
       latest: '',
       outdated: false,
       url: '',
       command: '',
-      checkedAt: Date.now(),
+      checkedAt: now,
       error: '',
+      transport: '',
     };
-    try {
-      // Tags, not `releases/latest`: a release page is an optional nicety, but
-      // every shipped version gets a tag, so tags are the authoritative list.
-      const response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/tags?per_page=50`, {
-        headers: { accept: 'application/vnd.github+json', 'user-agent': `dsh-deep-connect/${PLUGIN_VERSION}` },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) throw new Error(`GitHub 返回 HTTP ${response.status}`);
-      const body = await response.json();
-      const latest = pickLatestVersion(body);
-      info.latest = latest;
-      info.url = latest === '' ? '' : `https://github.com/${UPDATE_REPO}/releases/tag/v${latest}`;
-      info.outdated = latest !== '' && compareVersion(latest, PLUGIN_VERSION) > 0;
-      info.command = latest === ''
-        ? ''
-        : `curl -fsSL https://cdn.jsdelivr.net/gh/${UPDATE_REPO}@v${latest}/install.sh | bash`;
-    } catch (error) {
-      info.error = error instanceof Error ? error.message : String(error);
+    const attempts = [
+      // jsDelivr first: a CDN, no unauthenticated rate limit, and it lists the
+      // same tags. GitHub's API is second because 60 requests/hour is easy to
+      // exhaust on a shared IP, and a 403 there must not hide a release.
+      ['jsdelivr', async () => httpsGetJson(`https://data.jsdelivr.com/v1/packages/gh/${UPDATE_REPO}`, { timeoutMs: 12_000 })],
+      ['github', async () => httpsGetJson(`https://api.github.com/repos/${UPDATE_REPO}/tags?per_page=50`, { headers: { accept: 'application/vnd.github+json' }, timeoutMs: 12_000 })],
+      ['curl', async () => JSON.parse((await curlGet(`https://api.github.com/repos/${UPDATE_REPO}/tags?per_page=50`, { timeoutMs: 15_000 })).toString('utf8'))],
+      ['fetch', async () => {
+        const response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/tags?per_page=50`, {
+          headers: { accept: 'application/vnd.github+json', 'user-agent': `dsh-deep-connect/${PLUGIN_VERSION}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      }],
+    ];
+    const errors = [];
+    for (const [transport, attempt] of attempts) {
+      try {
+        const body = await attempt();
+        // GitHub tags return `[{name}]`; jsDelivr returns `{versions:[{version}]}`.
+        const list = Array.isArray(body) ? body : Array.isArray(body?.versions) ? body.versions.map((entry) => ({ name: entry?.version })) : [];
+        const latest = pickLatestVersion(list);
+        if (latest === '') throw new Error('响应里没有可识别的版本号');
+        info.latest = latest;
+        info.transport = transport;
+        info.url = `https://github.com/${UPDATE_REPO}/releases/tag/v${latest}`;
+        info.outdated = compareVersion(latest, PLUGIN_VERSION) > 0;
+        info.command = `curl -fsSL https://cdn.jsdelivr.net/gh/${UPDATE_REPO}@v${latest}/install.sh | bash`;
+        errors.length = 0;
+        break;
+      } catch (error) {
+        errors.push(`${transport}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (info.latest === '') {
+      info.error = errors.join(' · ').slice(0, 400);
+      // Retry in ten minutes, not six hours: a flaky proxy must not hide updates.
+      state.nextUpdateCheckAt = Date.now() + 10 * 60_000;
+      state.updateInfo = info;
+      state.updateCheckedAt = Date.now();
+      log('warn', `检查更新失败（10 分钟后重试）：${info.error}`);
+      return info;
     }
     state.updateInfo = info;
-    state.updateCheckedAt = info.checkedAt;
-    await store.setConfig({ lastUpdateCheckAt: info.checkedAt, latestVersion: info.latest }).catch(() => undefined);
+    state.updateCheckedAt = Date.now();
+    state.nextUpdateCheckAt = Date.now() + UPDATE_INTERVAL_MS;
+    await store.setConfig({ lastUpdateCheckAt: state.updateCheckedAt, latestVersion: info.latest }).catch(() => undefined);
+    log('info', `检查更新完成（${info.transport}）：最新 v${info.latest}，当前 v${PLUGIN_VERSION}`);
     return info;
+  }
+
+  /**
+   * Download and install the latest release in place.
+   *
+   * This is the "check and update" button: no copy-paste, no terminal. Files are
+   * replaced under the running plugin; Node keeps the already-imported modules,
+   * so the NEW code takes effect after Harness restarts, which the panel states.
+   */
+  async function applyUpdate() {
+    const info = await checkUpdate(true);
+    if (info.error !== '') throw badRequest(`检查更新失败：${info.error}`);
+    if (info.latest === '' || compareVersion(info.latest, PLUGIN_VERSION) <= 0) {
+      return { updated: false, version: PLUGIN_VERSION, latest: info.latest, restartRequired: false };
+    }
+    const work = join(root, 'update');
+    await rm(work, { recursive: true, force: true });
+    await mkdir(work, { recursive: true });
+    const archive = join(work, 'repo.tgz');
+    const routes = [
+      `https://codeload.github.com/${UPDATE_REPO}/tar.gz/refs/tags/v${info.latest}`,
+      `https://ghproxy.net/https://github.com/${UPDATE_REPO}/archive/refs/tags/v${info.latest}.tar.gz`,
+      `https://gh-proxy.com/https://github.com/${UPDATE_REPO}/archive/refs/tags/v${info.latest}.tar.gz`,
+    ];
+    const downloadErrors = [];
+    for (const route of routes) {
+      try {
+        const bytes = await httpsDownload(route, archive, { timeoutMs: 180_000 });
+        if (bytes > 1024) break;
+        throw new Error(`包只有 ${bytes} 字节`);
+      } catch (error) {
+        downloadErrors.push(`${route.split('/')[2]}: ${error instanceof Error ? error.message : String(error)}`);
+        await rm(archive, { force: true }).catch(() => undefined);
+      }
+    }
+    if (!(await stat(archive).then(() => true).catch(() => false))) {
+      // Last resort: curl with the host's proxy configuration.
+      try {
+        const bytes = await curlGet(routes[0], { timeoutMs: 180_000, maxBytes: 64 * 1024 * 1024 });
+        await writeFile(archive, bytes);
+      } catch (error) {
+        throw badRequest(`下载 v${info.latest} 失败：${downloadErrors.join(' · ')} · curl: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    await new Promise((resolve, reject) => {
+      const child = spawn('tar', ['-xzf', archive, '-C', work], { stdio: 'ignore' });
+      child.on('error', reject);
+      child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`tar 退出码 ${code}`))));
+    });
+    const entries = await readdir(work, { withFileTypes: true });
+    const extracted = entries.find((entry) => entry.isDirectory() && entry.name.startsWith('dsh-deep-connect-'));
+    if (extracted === undefined) throw badRequest('更新包内容不完整（没有找到 dsh-deep-connect-*）');
+    const source = join(work, extracted.name);
+    const pluginDir = dirname(fileURLToPath(import.meta.url));
+    const repoRoot = dirname(pluginDir);
+    await cp(join(source, 'plugin'), pluginDir, { recursive: true, force: true });
+    await cp(join(source, 'relay'), join(repoRoot, 'relay'), { recursive: true, force: true }).catch(() => undefined);
+    await rm(work, { recursive: true, force: true }).catch(() => undefined);
+    log('info', `已更新到 v${info.latest}，重启 Harness 后生效`);
+    return { updated: true, version: info.latest, restartRequired: true };
   }
 
   /* ------------------------------ phone gateway ------------------------------ */
@@ -834,7 +932,8 @@ export function apply(ctx, config) {
   /** Ensure a stable token for the phone page (persisted, so the QR survives). */
   async function mobileToken() {
     if (settings.mobileToken === '') {
-      settings.mobileToken = Buffer.from(await cryptoRandomBytes(24)).toString('base64url');
+      const { randomBytes } = await import('node:crypto');
+      settings.mobileToken = randomBytes(24).toString('base64url');
       await store.setConfig({ mobileToken: settings.mobileToken }).catch(() => undefined);
     }
     return settings.mobileToken;
@@ -934,54 +1033,6 @@ export function apply(ctx, config) {
       lan: lan === undefined ? '' : `http://${lan}:${gateway?.port ?? 0}`,
       error: state.mobile?.error ?? '',
     };
-  }
-
-  /** A tiny random-bytes helper that does not import the whole crypto module twice. */
-  async function cryptoRandomBytes(size) {
-    const { randomBytes } = await import('node:crypto');
-    return randomBytes(size);
-  }
-
-  /**
-   * Download and install the latest release in place.
-   *
-   * This is the "check and update" button: no copy-paste, no terminal. Files are
-   * replaced under the running plugin; Node keeps the already-imported modules,
-   * so the NEW code takes effect after Harness restarts, which the panel states.
-   */
-  async function applyUpdate() {
-    const info = await checkUpdate(true);
-    if (info.error !== '') throw badRequest(`检查更新失败：${info.error}`);
-    if (info.latest === '' || compareVersion(info.latest, PLUGIN_VERSION) <= 0) {
-      return { updated: false, version: PLUGIN_VERSION, latest: info.latest, restartRequired: false };
-    }
-    const response = await fetch(`https://codeload.github.com/${UPDATE_REPO}/tar.gz/refs/tags/v${info.latest}`, {
-      headers: { 'user-agent': `dsh-deep-connect/${PLUGIN_VERSION}` },
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (!response.ok) throw badRequest(`下载 v${info.latest} 失败（HTTP ${response.status}）`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const work = join(root, 'update');
-    await rm(work, { recursive: true, force: true });
-    await mkdir(work, { recursive: true });
-    const archive = join(work, 'repo.tgz');
-    await writeFile(archive, bytes);
-    await new Promise((resolve, reject) => {
-      const child = spawn('tar', ['-xzf', archive, '-C', work], { stdio: 'ignore' });
-      child.on('error', reject);
-      child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`tar 退出码 ${code}`))));
-    });
-    const entries = await readdir(work, { withFileTypes: true });
-    const extracted = entries.find((entry) => entry.isDirectory() && entry.name.startsWith('dsh-deep-connect-'));
-    if (extracted === undefined) throw badRequest('更新包内容不完整（没有找到 dsh-deep-connect-*）');
-    const source = join(work, extracted.name);
-    const pluginDir = dirname(fileURLToPath(import.meta.url));
-    const repoRoot = dirname(pluginDir);
-    await cp(join(source, 'plugin'), pluginDir, { recursive: true, force: true });
-    await cp(join(source, 'relay'), join(repoRoot, 'relay'), { recursive: true, force: true }).catch(() => undefined);
-    await rm(work, { recursive: true, force: true }).catch(() => undefined);
-    log('info', `已更新到 v${info.latest}，重启 Harness 后生效`);
-    return { updated: true, version: info.latest, restartRequired: true };
   }
 
   /** The panel's read model. */
@@ -1455,6 +1506,9 @@ export function apply(ctx, config) {
       setTimeout(() => {
         void checkUpdate(false).catch(() => undefined);
       }, 5_000).unref?.();
+      ctx.interval(() => {
+        void checkUpdate(false).catch(() => undefined);
+      }, 30 * 60_000);
       if (settings.mobileEnabled) {
         setTimeout(() => {
           void enableMobile().catch((error) => log('warn', `手机管理页启动失败：${error instanceof Error ? error.message : String(error)}`));
