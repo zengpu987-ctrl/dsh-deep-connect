@@ -29,13 +29,18 @@ import { RelayClient } from './host/relay.js';
 import { DeepConnectStore } from './host/store.js';
 import { SessionAdapter } from './host/sessions.js';
 import { createInheritedSession } from './host/inherit.js';
-import { RelayStation, adoptStation, parseStationLink, stationLink, findCloudflared } from './host/station.js';
+import { RelayStation, adoptStation, openTunnel, parseStationLink, stationLink, findCloudflared, lanAddress } from './host/station.js';
+import { MobileGateway } from './host/mobile.js';
+import { spawn } from 'node:child_process';
+import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_VERSION } from './host/crypto.js';
 
 export const name = 'deep-connect';
 
 /** The version shown in the panel and compared against GitHub releases. */
-export const PLUGIN_VERSION = '3.0.2';
+export const PLUGIN_VERSION = '4.0.0';
 /** GitHub repository the updater asks about. */
 const UPDATE_REPO = 'zengpu987-ctrl/dsh-deep-connect';
 /** Check at most this often unless the user asks explicitly. */
@@ -110,6 +115,11 @@ export function apply(ctx, config) {
     // v3.0.2: whether this machine shares conversation bodies (and allows
     // inheritance) with the station. The index stays visible either way.
     shareMemory: config?.shareMemory !== false,
+    // v4: phone access over a QR code, and one-click self-update.
+    mobileEnabled: config?.mobileEnabled === true,
+    mobileToken: String(config?.mobileToken ?? ''),
+    // A tunnel for the phone page costs one more cloudflared; tests turn it off.
+    mobileTunnel: config?.mobileTunnel !== false,
     autoConnect: config?.autoConnect !== false,
     autoIndex: config?.autoIndex !== false,
     indexIntervalMs: Math.max(5000, Number(config?.indexIntervalMs ?? 15000)),
@@ -161,6 +171,8 @@ export function apply(ctx, config) {
     station: undefined,
     stationError: '',
     stationAdopted: false,
+    /** Phone gateway: `{ gateway, tunnel, url, error }`. */
+    mobile: undefined,
     /** deviceId -> whether that peer shares conversation bodies. */
     peerShareMemory: new Map(),
     updateInfo: undefined,
@@ -817,6 +829,161 @@ export function apply(ctx, config) {
     return info;
   }
 
+  /* ------------------------------ phone gateway ------------------------------ */
+
+  /** Ensure a stable token for the phone page (persisted, so the QR survives). */
+  async function mobileToken() {
+    if (settings.mobileToken === '') {
+      settings.mobileToken = Buffer.from(await cryptoRandomBytes(24)).toString('base64url');
+      await store.setConfig({ mobileToken: settings.mobileToken }).catch(() => undefined);
+    }
+    return settings.mobileToken;
+  }
+
+  /** Start the phone page, with a public tunnel when cloudflared exists. */
+  async function enableMobile() {
+    if (state.mobile?.gateway !== undefined) return mobileView();
+    const token = await mobileToken();
+    const gateway = new MobileGateway({
+      token,
+      log,
+      onList: async () => {
+        const view = await buildListView();
+        return {
+          self: { deviceId: view.self.deviceId, name: view.self.name },
+          devices: [
+            { deviceId: view.self.deviceId, name: view.self.name, online: true, isSelf: true, sessionCount: view.stats.local, shareMemory: view.self.shareMemory },
+            ...view.peers.map((peer) => ({ deviceId: peer.deviceId, name: peer.name, online: peer.online, isSelf: false, sessionCount: peer.sessionCount, shareMemory: peer.shareMemory })),
+          ],
+          sessions: view.sessions.slice(0, 40).map((row) => ({
+            sessionId: row.sessionId,
+            ownerId: row.ownerId,
+            ownerName: row.ownerName,
+            title: row.title,
+            eventCount: row.eventCount,
+            live: row.live === true,
+            tasks: row.tasks,
+          })),
+        };
+      },
+      onCommand: async (body) => {
+        try {
+          const action = String(body?.action ?? '');
+          if (action === 'task') {
+            const deviceId = String(body.deviceId ?? '');
+            const text = String(body.text ?? '').trim();
+            if (!deviceId || !text) return { ok: false, error: 'deviceId and text are required' };
+            const reply = await command({ action: 'task-run', deviceId, text });
+            return { ok: true, sessionId: reply.sessionId };
+          }
+          if (action === 'prompt') {
+            const deviceId = String(body.deviceId ?? '');
+            const sessionId = String(body.sessionId ?? '');
+            const text = String(body.text ?? '').trim();
+            const reply = await command({ action: 'prompt', deviceId, sessionId, text, mode: 'queue' });
+            return { ok: true, deliveredTo: reply.deliveredTo };
+          }
+          return { ok: false, error: 'unknown action' };
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        }
+      },
+    });
+    await gateway.start();
+    let tunnel;
+    if (settings.mobileTunnel) {
+      try {
+        tunnel = await openTunnel(gateway.origin, { log });
+      } catch {
+        tunnel = undefined;
+      }
+    }
+    if (tunnel !== undefined) gateway.expose(tunnel.publicUrl);
+    state.mobile = { gateway, tunnel, error: '' };
+    settings.mobileEnabled = true;
+    await store.setConfig({ mobileEnabled: true, mobileToken: token }).catch(() => undefined);
+    return mobileView();
+  }
+
+  /** Stop the phone page. */
+  async function disableMobile() {
+    const current = state.mobile;
+    state.mobile = undefined;
+    settings.mobileEnabled = false;
+    await store.setConfig({ mobileEnabled: false }).catch(() => undefined);
+    try {
+      current?.tunnel?.close?.();
+    } catch {
+      /* gone */
+    }
+    await current?.gateway?.stop().catch(() => undefined);
+    return mobileView();
+  }
+
+  /** The panel's view of phone access. */
+  function mobileView() {
+    const gateway = state.mobile?.gateway;
+    const lan = lanAddress();
+    const url = gateway === undefined || gateway.port === 0
+      ? ''
+      : gateway.link(lan === undefined ? '' : `http://${lan}:${gateway.port}`);
+    return {
+      enabled: settings.mobileEnabled === true && gateway !== undefined,
+      url,
+      public: gateway?.publicUrl !== undefined && gateway.publicUrl !== '',
+      lan: lan === undefined ? '' : `http://${lan}:${gateway?.port ?? 0}`,
+      error: state.mobile?.error ?? '',
+    };
+  }
+
+  /** A tiny random-bytes helper that does not import the whole crypto module twice. */
+  async function cryptoRandomBytes(size) {
+    const { randomBytes } = await import('node:crypto');
+    return randomBytes(size);
+  }
+
+  /**
+   * Download and install the latest release in place.
+   *
+   * This is the "check and update" button: no copy-paste, no terminal. Files are
+   * replaced under the running plugin; Node keeps the already-imported modules,
+   * so the NEW code takes effect after Harness restarts, which the panel states.
+   */
+  async function applyUpdate() {
+    const info = await checkUpdate(true);
+    if (info.error !== '') throw badRequest(`检查更新失败：${info.error}`);
+    if (info.latest === '' || compareVersion(info.latest, PLUGIN_VERSION) <= 0) {
+      return { updated: false, version: PLUGIN_VERSION, latest: info.latest, restartRequired: false };
+    }
+    const response = await fetch(`https://codeload.github.com/${UPDATE_REPO}/tar.gz/refs/tags/v${info.latest}`, {
+      headers: { 'user-agent': `dsh-deep-connect/${PLUGIN_VERSION}` },
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) throw badRequest(`下载 v${info.latest} 失败（HTTP ${response.status}）`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const work = join(root, 'update');
+    await rm(work, { recursive: true, force: true });
+    await mkdir(work, { recursive: true });
+    const archive = join(work, 'repo.tgz');
+    await writeFile(archive, bytes);
+    await new Promise((resolve, reject) => {
+      const child = spawn('tar', ['-xzf', archive, '-C', work], { stdio: 'ignore' });
+      child.on('error', reject);
+      child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`tar 退出码 ${code}`))));
+    });
+    const entries = await readdir(work, { withFileTypes: true });
+    const extracted = entries.find((entry) => entry.isDirectory() && entry.name.startsWith('dsh-deep-connect-'));
+    if (extracted === undefined) throw badRequest('更新包内容不完整（没有找到 dsh-deep-connect-*）');
+    const source = join(work, extracted.name);
+    const pluginDir = dirname(fileURLToPath(import.meta.url));
+    const repoRoot = dirname(pluginDir);
+    await cp(join(source, 'plugin'), pluginDir, { recursive: true, force: true });
+    await cp(join(source, 'relay'), join(repoRoot, 'relay'), { recursive: true, force: true }).catch(() => undefined);
+    await rm(work, { recursive: true, force: true }).catch(() => undefined);
+    log('info', `已更新到 v${info.latest}，重启 Harness 后生效`);
+    return { updated: true, version: info.latest, restartRequired: true };
+  }
+
   /** The panel's read model. */
   async function buildListView() {
     const identity = store.getIdentity();
@@ -855,6 +1022,7 @@ export function apply(ctx, config) {
       protocol: PROTOCOL_VERSION,
       edition: 'Pro',
       station: stationView(),
+      mobile: mobileView(),
       update: state.updateInfo ?? {
         current: PLUGIN_VERSION,
         latest: '',
@@ -1085,8 +1253,22 @@ export function apply(ctx, config) {
       return buildListView();
     }
 
+    if (action === 'mobile-enable') {
+      const mobile = await enableMobile();
+      return { mobile, view: await buildListView() };
+    }
+
+    if (action === 'mobile-disable') {
+      const mobile = await disableMobile();
+      return { mobile, view: await buildListView() };
+    }
+
     if (action === 'update-check') {
       return checkUpdate(body.force === true);
+    }
+
+    if (action === 'update-install') {
+      return applyUpdate();
     }
 
     if (action === 'forget-peer') {
@@ -1273,6 +1455,11 @@ export function apply(ctx, config) {
       setTimeout(() => {
         void checkUpdate(false).catch(() => undefined);
       }, 5_000).unref?.();
+      if (settings.mobileEnabled) {
+        setTimeout(() => {
+          void enableMobile().catch((error) => log('warn', `手机管理页启动失败：${error instanceof Error ? error.message : String(error)}`));
+        }, 4_000).unref?.();
+      }
     })().catch((error) => log('warn', `Deep Connect 启动失败：${error instanceof Error ? error.message : String(error)}`));
     return () => {
       state.started = false;
@@ -1280,11 +1467,18 @@ export function apply(ctx, config) {
       state.relay = undefined;
       void state.station?.stop().catch(() => undefined);
       state.station = undefined;
+      try {
+        state.mobile?.tunnel?.close?.();
+      } catch {
+        /* gone */
+      }
+      void state.mobile?.gateway?.stop().catch(() => undefined);
+      state.mobile = undefined;
     };
   }, 'deep-connect: relay lifecycle');
 
   /* Exposed for the offline test harness: it drives a real plugin instance with
    * a stub context and asserts on these, which is the only way to test this
    * half without booting the whole Harness. */
-  return { command, publishIndex, store, sessions, state, buildListView, queuePeerSync, runSyncQueue, serveExport, compareVersion, checkUpdate };
+  return { command, publishIndex, store, sessions, state, buildListView, queuePeerSync, runSyncQueue, serveExport, compareVersion, checkUpdate, applyUpdate, enableMobile, disableMobile };
 }

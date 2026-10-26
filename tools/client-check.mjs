@@ -420,8 +420,13 @@ let readerTree = first.renderer.render();
 const readerHtml = serialize(readerTree);
 check('reader asked for history', globalThis.fetch.calls.some((b) => b.action === 'history' && b.sessionId === REMOTE_SESSION.sessionId), JSON.stringify(globalThis.fetch.calls));
 check('reader shows the transcript', readerHtml.includes('Hello from the other machine') && readerHtml.includes('Reading the event log now.'));
-check('reader shows collapsed tool turns with names', readerHtml.includes('工具：Read') && readerHtml.includes('工具：Bash'));
-check('reader marks the error turn', readerHtml.includes('dc_turnError'));
+check('reader separates dialogue from trajectory', readerHtml.includes('对话') && readerHtml.includes('轨迹'));
+const trajectoryTab = find(readerTree, (node) => node.type === 'button' && textOf(node).startsWith('轨迹'));
+trajectoryTab?.props?.onClick({});
+await settle();
+const trajectoryHtml = serialize(first.renderer.render());
+check('trajectory pane shows tool calls with their names', trajectoryHtml.includes('工具：Read') && trajectoryHtml.includes('工具：Bash'), trajectoryHtml.slice(0, 200));
+check('trajectory pane marks the error turn', trajectoryHtml.includes('dc_turnError'));
 check('reader has 返回 and the composer buttons', readerHtml.includes('返回') && readerHtml.includes('发送') && readerHtml.includes('插话'));
 
 const textarea = find(readerTree, (node) => node.type === 'textarea');
@@ -490,6 +495,19 @@ joinButton?.props?.onClick({});
 await settle();
 const joinCall = globalThis.fetch.calls.find((b) => b.action === 'station-join');
 check('joining posts station-join with the pasted link', joinCall?.link === 'https://station.example.com#invite-token-0123456789', JSON.stringify(joinCall));
+
+/* --------------------------------------------- 7b. one-click update (4.0.0) */
+const settingsButton = find(first.tree, (node) => node.type === 'button' && textOf(node) === '设置');
+settingsButton?.props?.onClick({});
+await settle();
+const settingsTree = first.renderer.render();
+const settingsHtml = serialize(settingsTree);
+check('settings offers a one-click check-and-update', settingsHtml.includes('检查并更新'));
+const installButton = find(settingsTree, (node) => node.type === 'button' && textOf(node) === '检查并更新');
+installButton?.props?.onClick({});
+await settle();
+check('the update button installs instead of copying a command', globalThis.fetch.calls.some((call) => call.action === 'update-install'), JSON.stringify(globalThis.fetch.calls.slice(-3)));
+check('settings offers phone access', settingsHtml.includes('手机管理') && settingsHtml.includes('开启手机管理'));
 
 /* ---------------------------------------------------------------- 8. errors */
 const down = await renderPanel(makeFetch({ networkFail: true }));

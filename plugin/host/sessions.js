@@ -172,18 +172,26 @@ export function buildTranscript(events) {
     switch (event.type) {
       case 'user/message': {
         const text = contentToText(data.content);
-        if (text.trim() !== '') turns.push({ ...base, role: 'user', text: clip(text, TURN_CHARS) });
+        if (text.trim() !== '') turns.push({ ...base, role: 'user', kind: 'dialogue', text: clip(text, TURN_CHARS) });
         break;
       }
       case 'assistant/message': {
         const text = contentToText(data.message?.content);
-        if (text.trim() !== '') turns.push({ ...base, role: 'assistant', text: clip(text, TURN_CHARS) });
+        if (text.trim() !== '') turns.push({ ...base, role: 'assistant', kind: 'dialogue', text: clip(text, TURN_CHARS) });
+        break;
+      }
+      case 'tool/call': {
+        // The call itself belongs to the trajectory pane: name + arguments are
+        // what "how it got there" means, while the answer text stays in dialogue.
+        const name = typeof data.name === 'string' ? data.name : '?';
+        const args = typeof data.arguments === 'string' ? data.arguments : JSON.stringify(data.arguments ?? '');
+        turns.push({ ...base, role: 'call', kind: 'trajectory', toolName: name, text: clip(args, TOOL_RESULT_CHARS) });
         break;
       }
       case 'tool/result': {
         const message = data.message ?? {};
         const text = contentToText(message.content);
-        const turn = { ...base, role: 'tool', text: clip(text, TOOL_RESULT_CHARS) };
+        const turn = { ...base, role: 'tool', kind: 'trajectory', text: clip(text, TOOL_RESULT_CHARS) };
         if (typeof data.meta?.toolName === 'string') turn.toolName = data.meta.toolName;
         else if (typeof message.name === 'string') turn.toolName = message.name;
         const failed = message.isError === true || data.error !== undefined;
@@ -193,12 +201,12 @@ export function buildTranscript(events) {
       }
       case 'system/message': {
         const text = contentToText(data.message?.content);
-        if (text.trim() !== '') turns.push({ ...base, role: 'system', text: clip(text, 20_000) });
+        if (text.trim() !== '') turns.push({ ...base, role: 'system', kind: 'trajectory', text: clip(text, 20_000) });
         break;
       }
       case 'developer/message': {
         const text = contentToText(data.message?.content);
-        if (text.trim() !== '') turns.push({ ...base, role: 'developer', text: clip(text, 20_000) });
+        if (text.trim() !== '') turns.push({ ...base, role: 'developer', kind: 'trajectory', text: clip(text, 20_000) });
         break;
       }
       default:

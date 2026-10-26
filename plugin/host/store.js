@@ -130,6 +130,8 @@ export class DeepConnectStore {
       autoConnect: this.config.autoConnect !== false,
       autoIndex: this.config.autoIndex !== false,
       shareMemory: this.config.shareMemory !== false,
+      mobileEnabled: this.config.mobileEnabled === true,
+      mobileToken: String(this.config.mobileToken ?? ''),
       indexIntervalMs: Math.max(5000, Number(this.config.indexIntervalMs ?? 15000)),
       historyLimitEvents: Math.max(200, Number(this.config.historyLimitEvents ?? 20000)),
       // v3 station fields. `stationRole` is 'host' when this machine generated
@@ -149,9 +151,10 @@ export class DeepConnectStore {
       for (const key of ['relayUrl', 'token', 'secret', 'deviceName', 'stationUrl', 'stationToken', 'stationRole', 'latestVersion']) {
         if (patch[key] !== undefined) next[key] = String(patch[key]);
       }
-      for (const key of ['autoConnect', 'autoIndex', 'shareMemory']) {
+      for (const key of ['autoConnect', 'autoIndex', 'shareMemory', 'mobileEnabled']) {
         if (patch[key] !== undefined) next[key] = patch[key] === true;
       }
+      if (patch.mobileToken !== undefined) next.mobileToken = String(patch.mobileToken);
       if (patch.indexIntervalMs !== undefined) {
         next.indexIntervalMs = Math.max(5000, Number(patch.indexIntervalMs) || 15000);
       }

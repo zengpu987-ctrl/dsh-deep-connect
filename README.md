@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.2/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.0/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -69,7 +69,7 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.2/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.0/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -92,6 +92,29 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.2/in
 
 想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
 在面板里改填那条地址即可，协议与中继站完全一样。
+
+---
+
+## v4.0.0：一键自更新、对话/轨迹分栏、实时跟随与插话、微信扫码、默认留在中继站
+
+- **检查更新直接装。** 「检查并更新」不再显示一条 curl：Host 下载对应 tag 的仓库包、
+  用 `tar` 解到临时目录，再把 `plugin/`（以及 `relay/`）覆盖到正在运行的位置；
+  面板提示「已更新到 vX，重启 Harness 后生效」。失败会明说原因，不会静默。
+- **对话与轨迹分栏。** 阅读器顶部两个页签：**对话**（用户/助手的正文）与
+  **轨迹**（工具调用、工具结果、系统/开发者事件）。`tool/call` 现在单独成一条轨迹，
+  带工具名和参数，不再只藏在助手正文里。
+- **实时跟随 + 插话。** 打开发往对端的会话时每 2.5 秒刷新一次，顶部显示「实时」；
+  输入框的「插话」走 `steer`，直接进入对端正跑着的那一轮，「发送」则排队下一轮。
+- **微信扫码手机管理。** 设置里开启「手机管理」后，本机启动一个带令牌的手机页面
+  （设备列表、任务清单、给设备下发命令），有 cloudflared 时额外开一条隧道并显示二维码；
+  微信扫一扫即可打开。令牌在路径里，错令牌一律 404。
+- **默认留在中继站，可退出。** 加入过的中继站写入配置，重启/更新后自动重连；
+  托管端的中继与隧道是 detach 进程并落盘 `station.json`，重启后自动接续（`adoptStation`）。
+  想离开点「退出中继站」，退出后下次启动不再自动加入。**只有整机重启（断电/重启系统）
+  会杀掉 detached 进程**，那时托管端需要重新生成一次链接——这是 Cloudflare 快速隧道的
+  固有限制，不是配置丢失。
+
+> 协议未变（仍是 v3 线协议），4.0.0 与 3.x 可以滚动升级、混跑。
 
 ---
 
@@ -148,7 +171,7 @@ v2 把「点开才拉」变成「一出现就同步」：
 > 本机没挂载 `sessionPersistence` 的部署会直接说明无法继承。
 
 发版检查：`node tools/station-smoke.mjs` 真起一个中继站（relay 子进程 + cloudflared 隧道）并验证令牌、`proto=3` 门禁与邀请链接往返；`node tools/deep-connect-e2e.mjs` 覆盖了自动全文同步、缓存优先读取、
-继承落地这三条新路径（76 项），`relay-smoke`（35 项）与 `client-check`（95 项）不变。
+继承落地等路径（103 项），`relay-smoke`（35 项）与 `client-check`（95 项）不变。
 
 
 ---
@@ -217,9 +240,9 @@ v2 把「点开才拉」变成「一出现就同步」：
 
 | 部分 | 状态 |
 |---|---|
-| 中继 `relay/relay.cjs` | ✅ 端到端验证，32 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱与重连排空、半开连接离场、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
-| Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，87 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、**设备一出现就自动全文同步**、**缓存优先读取**、**继承成本机会话且事件逐条重排**、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
-| 浏览器半渲染 | ✅ 80 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
+| 中继 `relay/relay.cjs` | ✅ 端到端验证，35 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱与重连排空、半开连接离场、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
+| Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，103 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、**设备一出现就自动全文同步**、**缓存优先读取**、**继承成本机会话且事件逐条重排**、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
+| 浏览器半渲染 | ✅ 95 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
 | `deep-connect/relay/cloudflare` | ⚠️ **未运行过**（本机 `workers.dev` 被污染且没有账号）。按官方 API 写，首次 `wrangler deploy` 才是真测试 |
 | `deep-connect/relay/deno` | ⚠️ **未运行过**。同上，协议与 `relay.cjs` 一致 |
 
@@ -228,7 +251,7 @@ v2 把「点开才拉」变成「一出现就同步」：
 ```bash
 node tools/relay-smoke.mjs        # 中继（35 项）
 node tools/station-smoke.mjs      # 一键中继站：真起 relay + cloudflared + 接续（17 项）
-node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（95 项）
+node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（103 项）
 node tools/client-check.mjs       # 浏览器半（95 项）
 node ../tools/browser/check-connect.mjs   # 真机 GUI：面板真的渲染出来（需 GUI 在 19387 运行）
 ```

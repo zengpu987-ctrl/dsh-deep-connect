@@ -211,8 +211,8 @@ const hostB = makeStubContext({ accountId: 'acct-shared-7f3a', sessions: session
 
 try {
   section('start two Host halves against one relay');
-  const apiA = apply(hostA.ctx, { root: join(dir, 'a'), relayUrl, deviceName: 'A 机', indexIntervalMs: 5000, heartbeatMs: 1500 });
-  const apiB = apply(hostB.ctx, { root: join(dir, 'b'), relayUrl, deviceName: 'B 机', indexIntervalMs: 5000, heartbeatMs: 1500 });
+  const apiA = apply(hostA.ctx, { root: join(dir, 'a'), relayUrl, deviceName: 'A 机', indexIntervalMs: 5000, heartbeatMs: 1500, mobileTunnel: false });
+  const apiB = apply(hostB.ctx, { root: join(dir, 'b'), relayUrl, deviceName: 'B 机', indexIntervalMs: 5000, heartbeatMs: 1500, mobileTunnel: false });
   // The production heartbeat is 20s; a test cannot wait that long, and the
   // recovery path is exactly what the relay-restart section exercises.
   check(hostA.routes.length === 1 && hostA.routes[0].path === '/api/deep-connect/api', 'A registered the browser route');
@@ -500,6 +500,29 @@ try {
   await sleep(300);
   const afterShare = await apiA.command({ action: 'list' });
   check(afterShare.self.shareMemory === true, 'the switch reports itself back on');
+
+  section('v4: phone page + QR target');
+  const mobile = await apiA.command({ action: 'mobile-enable' });
+  check(mobile.mobile.enabled === true, 'phone access reports itself enabled');
+  const mobileUrl = String(mobile.mobile.url ?? '');
+  check(/\/m\/[A-Za-z0-9_-]+\/$/.test(mobileUrl), `the phone URL carries a token (${mobileUrl})`);
+  const localMobile = mobileUrl.replace(/^http:\/\/[^/]+/, `http://127.0.0.1:${new URL(mobileUrl).port}`);
+  const pageResponse = await fetch(localMobile);
+  const pageText = await pageResponse.text();
+  check(pageResponse.ok && pageText.includes('Deep Connect'), 'the phone page serves');
+  check(!(await fetch(localMobile.replace(/\/m\/[^/]+\//, '/m/wrong-token/'))).ok, 'a wrong token is refused');
+  const mobileList = await (await fetch(`${localMobile}api?view=1`)).json();
+  check(Array.isArray(mobileList.devices) && mobileList.devices.length >= 2, 'the phone lists both devices');
+  const mobileTask = await (await fetch(`${localMobile}api`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'task', deviceId: listB.self.deviceId, text: '手机下发的命令' }),
+  })).json();
+  check(mobileTask.ok === true && String(mobileTask.sessionId).startsWith('session-new-'), 'a command from the phone lands on the peer');
+  check(promptsB.some((request) => request.content?.[0]?.text === '手机下发的命令'), 'the peer really ran the phone command');
+  await apiA.command({ action: 'mobile-disable' });
+  const afterMobile = await apiA.command({ action: 'list' });
+  check(afterMobile.mobile.enabled === false, 'phone access can be switched off again');
 
   section('settings round-trip');
   const configured = await apiB.command({ action: 'configure', deviceName: 'B 机（改名）', secret: 'my-shared-passphrase' });

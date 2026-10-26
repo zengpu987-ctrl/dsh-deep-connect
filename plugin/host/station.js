@@ -187,6 +187,57 @@ export async function adoptStation({ root, log = () => {} }) {
   return station;
 }
 
+/**
+ * Open a Cloudflare quick tunnel in front of any local URL.
+ *
+ * Used both by a station (in front of its relay) and by the phone gateway (in
+ * front of the panel's mobile page). Best-effort by design: quick tunnels are
+ * rate limited and explicitly "not guaranteed".
+ *
+ * @param {string} targetUrl - local URL to expose.
+ * @param {{binary?: string, log?: Function, timeoutMs?: number}} [options]
+ * @returns {Promise<{publicUrl: string, close: () => void}|undefined>}
+ */
+export async function openTunnel(targetUrl, options = {}) {
+  const binary = options.binary ?? (await findCloudflared());
+  const log = options.log ?? (() => {});
+  if (binary === undefined) return undefined;
+  return new Promise((resolve) => {
+    const child = spawn(binary, ['tunnel', '--url', targetUrl, '--no-autoupdate'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let settled = false;
+    let buffer = '';
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (value === undefined) {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          /* already gone */
+        }
+      }
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(undefined), Number(options.timeoutMs ?? 25_000));
+    const onData = (chunk) => {
+      const text = String(chunk);
+      buffer += text;
+      const match = buffer.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      if (match !== null) {
+        const publicUrl = match[0].replace(/\/$/, '');
+        finish({ publicUrl, close: () => { try { child.kill('SIGTERM'); } catch { /* gone */ } } });
+      }
+      if (/\b(ERR|failed|error)\b/i.test(text)) log('warn', `cloudflared: ${text.trim().split('\n').slice(-1)[0]}`);
+      if (buffer.length > 200_000) buffer = buffer.slice(-100_000);
+    };
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
+    child.on('exit', () => finish(undefined));
+    child.on('error', () => finish(undefined));
+  });
+}
+
 /** One running station: a relay child plus, when public, a tunnel child. */
 export class RelayStation {
   /**

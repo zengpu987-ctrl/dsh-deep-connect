@@ -171,6 +171,8 @@ window.__ModuleLoader__.load({
 				taskDraft: '',
 				/** The reader's `{ deviceId, sessionId }`, or null. */
 				reader: null,
+				/** `dialogue` | `trajectory` in the reader. */
+				readerPane: 'dialogue',
 				/** The last `history` payload, plus its own status and error. */
 				history: null,
 				historyStatus: 'idle',
@@ -382,6 +384,12 @@ window.__ModuleLoader__.load({
 			roleTool: '工具',
 			roleSystem: '系统',
 			roleDeveloper: '开发者',
+			paneDialogue: '对话',
+			paneTrajectory: '轨迹',
+			paneEmptyDialogue: '这条对话还没有对话内容。',
+			paneEmptyTrajectory: '这条对话还没有工具轨迹。',
+			liveHint: '实时跟随对方进程',
+			liveOn: '实时',
 			toolName: '工具：{name}',
 			expandTurn: '展开',
 			collapseTurn: '收起',
@@ -399,6 +407,19 @@ window.__ModuleLoader__.load({
 			inheritHint: '继承 = 把这条会话的完整事件复制成一条本机会话，用本机模型和工具接着干；原会话仍留在 {name} 上。',
 			syncDone: '全文已同步 {n}/{m}',
 			syncRunning: '正在同步全文…',
+			updateInstall: '检查并更新',
+			updating: '正在更新…',
+			updatedRestart: '已更新到 v{version}，重启 Harness 后生效',
+			upToDateAlready: '已是最新版本 v{version}',
+			mobileTitle: '手机管理（微信扫码）',
+			mobileEnable: '开启手机管理',
+			mobileDisable: '关闭手机管理',
+			mobileHint: '开启后本机提供一个手机管理页，用微信扫下面的二维码即可查看设备、任务并下发命令。',
+			mobileQrHint: '二维码指向 {url}',
+			mobilePublic: '公网可达（附件隧道）',
+			mobileLanOnly: '仅同一局域网可扫',
+			stationLeave: '退出中继站',
+			stationLeaveHint: '退出后本机不再连接这个中继站，下次启动也不会自动加入。',
 			proBadge: 'Pro',
 			stationTitle: '中继站',
 			stationIntro: '一台设备生成中继站，把链接发给其它设备，粘贴进来点「加入」即可互通。链接里带着邀请令牌，谁拿到链接谁就能加入。',
@@ -531,6 +552,12 @@ window.__ModuleLoader__.load({
 			roleTool: 'Tool',
 			roleSystem: 'System',
 			roleDeveloper: 'Developer',
+			paneDialogue: 'Dialogue',
+			paneTrajectory: 'Trajectory',
+			paneEmptyDialogue: 'No dialogue yet.',
+			paneEmptyTrajectory: 'No tool trajectory yet.',
+			liveHint: 'Follow the peer in real time',
+			liveOn: 'Live',
 			toolName: 'Tool: {name}',
 			expandTurn: 'Expand',
 			collapseTurn: 'Collapse',
@@ -548,6 +575,19 @@ window.__ModuleLoader__.load({
 			inheritHint: 'Inherit copies this conversation’s full event log into a new local session so this machine’s model and tools continue the work; the original stays on {name}.',
 			syncDone: 'Bodies synced {n}/{m}',
 			syncRunning: 'Syncing conversation bodies…',
+			updateInstall: 'Check and update',
+			updating: 'Updating…',
+			updatedRestart: 'Updated to v{version}; restart Harness to apply',
+			upToDateAlready: 'Already up to date (v{version})',
+			mobileTitle: 'Phone access (WeChat QR)',
+			mobileEnable: 'Enable phone access',
+			mobileDisable: 'Disable phone access',
+			mobileHint: 'Enables a small management page for phones; scan the QR with WeChat to see devices and tasks and to send commands.',
+			mobileQrHint: 'The QR points at {url}',
+			mobilePublic: 'Publicly reachable (extra tunnel)',
+			mobileLanOnly: 'LAN only',
+			stationLeave: 'Leave station',
+			stationLeaveHint: 'Leaves this station; it will not rejoin automatically on the next start.',
 			proBadge: 'Pro',
 			stationTitle: 'Relay station',
 			stationIntro: 'One device creates a station and sends the link; every other device pastes it and clicks Join. The invite token lives in the link, so whoever holds the link can join.',
@@ -718,6 +758,7 @@ window.__ModuleLoader__.load({
 					draft.stats = value.stats !== null && typeof value.stats === 'object' ? value.stats : null;
 					draft.version = typeof value.version === 'string' ? value.version : '';
 					draft.station = value.station !== null && typeof value.station === 'object' ? value.station : null;
+					draft.mobile = value.mobile !== null && typeof value.mobile === 'object' ? value.mobile : null;
 					draft.update = value.update !== null && typeof value.update === 'object' ? value.update : null;
 					draft.error = null;
 				});
@@ -789,6 +830,7 @@ window.__ModuleLoader__.load({
 				store.update((draft) => {
 					draft.view = 'reader';
 					draft.reader = { deviceId, sessionId };
+					draft.readerPane = 'dialogue';
 					draft.history = null;
 					draft.historyStatus = 'loading';
 					draft.historyError = null;
@@ -1015,6 +1057,48 @@ window.__ModuleLoader__.load({
 				return configure({ shareMemory: current !== true });
 			}
 
+			/** Check GitHub and install a newer release in place. */
+			async function installUpdate() {
+				store.update((draft) => { draft.pending = true; draft.error = null; });
+				try {
+					const value = await request({ action: 'update-install' });
+					if (disposed) return false;
+					store.update((draft) => {
+						draft.pending = false;
+						draft.sent = {
+							text: value?.updated === true
+								? t('updatedRestart').replace('{version}', String(value.version ?? ''))
+								: t('upToDateAlready').replace('{version}', String(value?.version ?? '')),
+							mode: 'system',
+							at: Date.now(),
+						};
+					});
+					await load(true);
+					return true;
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; draft.error = messageOf(error, t); });
+					return false;
+				}
+			}
+
+			/** Turn the phone page on or off. */
+			async function toggleMobile(on) {
+				store.update((draft) => { draft.pending = true; draft.error = null; });
+				try {
+					const value = await request({ action: on ? 'mobile-enable' : 'mobile-disable' });
+					if (disposed) return false;
+					const view = value.view !== null && typeof value.view === 'object' ? value.view : null;
+					if (view !== null) publish(view);
+					store.update((draft) => { draft.pending = false; });
+					return true;
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; draft.error = messageOf(error, t); });
+					return false;
+				}
+			}
+
 			/** Generate a station here, then adopt the returned view. */
 			async function createStation() {
 				store.update((draft) => { draft.pending = true; draft.error = null; });
@@ -1095,7 +1179,7 @@ window.__ModuleLoader__.load({
 
 			return {
 				store,
-				actions: { load, openReader, closeReader, reloadHistory, toggleSettings, configure, reconnect, sendPrompt, inheritSession, createStation, joinStation, stopStation, checkUpdate, selectDevice, runTask, inheritRow, toggleMemory },
+				actions: { load, openReader, closeReader, reloadHistory, toggleSettings, configure, reconnect, sendPrompt, inheritSession, createStation, joinStation, stopStation, checkUpdate, selectDevice, runTask, inheritRow, toggleMemory, installUpdate, toggleMobile },
 				/** Whether this controller can still publish (the poll reads it). */
 				isDisposed: () => disposed,
 				dispose() {
@@ -1152,7 +1236,7 @@ window.__ModuleLoader__.load({
 		 * The settings section, rendered inline so the unconfigured empty state
 		 * can offer exactly the same fields without a second implementation.
 		 */
-		function SettingsSection({ t, self, station, update, version, pending, onSave, onGenerate, onJoin, onStop, onCheckUpdate }) {
+		function SettingsSection({ t, self, station, update, version, mobile, pending, onSave, onGenerate, onJoin, onStop, onCheckUpdate, onInstallUpdate, onToggleMobile, onLeaveStation }) {
 			const [deviceName, setDeviceName] = React.useState(typeof self?.name === 'string' ? self.name : '');
 			const [autoIndex, setAutoIndex] = React.useState(true);
 			const [autoConnect, setAutoConnect] = React.useState(true);
@@ -1190,6 +1274,7 @@ window.__ModuleLoader__.load({
 								'dc_stationRow',
 								button('dc_ghost', copied === 'link' ? t('stationCopied') : t('stationCopy'), () => void copy(link, 'link')),
 								role === 'host' && running ? button('dc_ghost', t('stationStop'), () => void onStop()) : null,
+								link === '' ? null : button('dc_ghost', t('stationLeave'), () => void onLeaveStation(), { title: t('stationLeaveHint') }),
 								span('dc_fieldHint', reach),
 							),
 						),
@@ -1219,15 +1304,39 @@ window.__ModuleLoader__.load({
 						span('dc_updateText', t('updateAvailable').replace('{latest}', String(update?.latest ?? '')).replace('{current}', String(update?.current ?? version ?? ''))),
 						span('dc_fieldLabel', t('updateCommand')),
 						h('input', { className: 'dc_input dc_mono', type: 'text', value: String(update?.command ?? ''), readOnly: true }),
-						div('dc_stationRow',
+						div(
+							'dc_stationRow',
 							button('dc_ghost', copied === 'update' ? t('stationCopied') : t('updateCopy'), () => void copy(String(update?.command ?? ''), 'update')),
-							button('dc_ghost', t('updateCheck'), () => void onCheckUpdate?.(true)),
+							button('dc_ghost', pending ? t('updating') : t('updateInstall'), () => void onInstallUpdate?.(), { disabled: pending }),
 						),
 					)
 					: div(
 						'dc_stationRow',
 						span('dc_fieldHint', update?.error !== undefined && update?.error !== '' ? t('updateUnknown').replace('{error}', String(update.error)) : t('updateUpToDate').replace('{current}', String(update?.current ?? version ?? ''))),
-						button('dc_ghost', t('updateCheck'), () => void onCheckUpdate?.(true)),
+						button('dc_ghost', pending ? t('updating') : t('updateInstall'), () => void onInstallUpdate?.(), { disabled: pending }),
+					),
+				h('h3', { className: 'dc_stationTitle' }, t('mobileTitle')),
+				mobile?.enabled === true
+					? div(
+						'dc_mobile',
+						h('img', {
+							className: 'dc_qr',
+							src: `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(String(mobile.url ?? ''))}`,
+							alt: t('mobileQrHint').replace('{url}', String(mobile.url ?? '')),
+							width: 180, height: 180,
+						}),
+						h('input', { className: 'dc_input dc_mono', type: 'text', value: String(mobile.url ?? ''), readOnly: true, 'aria-label': t('mobileTitle') }),
+						div(
+							'dc_stationRow',
+							span('dc_fieldHint', mobile.public === true ? t('mobilePublic') : t('mobileLanOnly')),
+							button('dc_ghost', t('mobileDisable'), () => void onToggleMobile?.(false), { disabled: pending }),
+						),
+						span('dc_fieldHint', t('mobileHint')),
+					)
+					: div(
+						'dc_stationRow',
+						span('dc_fieldHint', t('mobileHint')),
+						button('dc_ghost', t('mobileEnable'), () => void onToggleMobile?.(true), { disabled: pending }),
 					),
 				para('dc_note', t('settingsCipher')),
 				h(
@@ -1330,7 +1439,7 @@ window.__ModuleLoader__.load({
 		 * The reader: the session's title, its full transcript, and the composer
 		 * that hands a prompt to the machine owning the conversation.
 		 */
-		function ReaderView({ t, state, onBack, onSend, onInherit }) {
+		function ReaderView({ t, state, onBack, onSend, onInherit, onPane }) {
 			// One open/closed flag per turn key, so collapsing is per tool call.
 			const [openTools, setOpenTools] = React.useState({});
 			const [draft, setDraft] = React.useState('');
@@ -1345,7 +1454,10 @@ window.__ModuleLoader__.load({
 					? (typeof state.self?.name === 'string' && state.self.name !== '' ? state.self.name : t('thisDevice'))
 					: (peerMap(state.peers).get(owner)?.name ?? owner);
 			const title = typeof history?.title === 'string' && history.title !== '' ? history.title : t('nameFallback');
-			const transcript = Array.isArray(history?.transcript) ? history.transcript : [];
+			const allTurns = Array.isArray(history?.transcript) ? history.transcript : [];
+			const pane = state.readerPane === 'trajectory' ? 'trajectory' : 'dialogue';
+			const isTrajectory = (turn) => (typeof turn?.kind === 'string' ? turn.kind === 'trajectory' : ['tool', 'call', 'system', 'developer'].includes(String(turn?.role ?? '')));
+			const transcript = allTurns.filter((turn) => (pane === 'trajectory' ? isTrajectory(turn) : !isTrajectory(turn)));
 			const busy = state.pending === true;
 			// The confirmation is transient: it disappears on its own timer.
 			const sent = state.sent !== null && typeof state.sent === 'object' && Date.now() - Number(state.sent.at ?? 0) < SENT_MS ? state.sent : null;
@@ -1355,6 +1467,12 @@ window.__ModuleLoader__.load({
 				const accepted = await onSend(draft, mode);
 				if (accepted === true) reset();
 			};
+			const tabs = div(
+				'dc_tabs',
+				button(cx('dc_tab', pane === 'dialogue' && 'dc_tabOn'), `${t('paneDialogue')} ${count(allTurns.filter((turn) => !isTrajectory(turn)).length)}`, () => onPane?.('dialogue')),
+				button(cx('dc_tab', pane === 'trajectory' && 'dc_tabOn'), `${t('paneTrajectory')} ${count(allTurns.filter(isTrajectory).length)}`, () => onPane?.('trajectory')),
+				online && remote ? span('dc_badge dc_badgeLive', t('liveOn'), { title: t('liveHint') }) : null,
+			);
 			const body = state.historyStatus === 'loading'
 				? div('dc_loading', t('readerLoading'))
 				: state.historyStatus === 'error'
@@ -1402,6 +1520,7 @@ window.__ModuleLoader__.load({
 							{ key: `rt:${index}` },
 						))),
 					),
+				tabs,
 				div('dc_scroll', body),
 				div(
 					'dc_composer',
@@ -1465,6 +1584,15 @@ window.__ModuleLoader__.load({
 			React.useEffect(() => {
 				void actions.load(false);
 			}, [actions]);
+
+			/** While a remote reader is open, follow the owning machine. */
+			React.useEffect(() => {
+				if (state.view !== 'reader' || state.reader === null) return undefined;
+				const remote = state.reader.deviceId !== state.self?.deviceId;
+				if (!remote || typeof window === 'undefined' || typeof window.setInterval !== 'function') return undefined;
+				const timer = window.setInterval(() => { void actions.reloadHistory(); }, 2500);
+				return () => window.clearInterval(timer);
+			}, [state.view, state.reader, state.self, actions]);
 
 			/** Retire the "sent" confirmation without waiting for the next poll. */
 			React.useEffect(() => {
@@ -1538,12 +1666,16 @@ window.__ModuleLoader__.load({
 				station: state.station,
 				update: state.update,
 				version: state.version,
+				mobile: state.mobile,
 				pending: state.pending === true,
 				onSave: (patch) => void actions.configure(patch),
 				onGenerate: () => void actions.createStation(),
 				onJoin: (link) => void actions.joinStation(link),
 				onStop: () => void actions.stopStation(),
 				onCheckUpdate: (force) => void actions.checkUpdate(force),
+				onInstallUpdate: () => void actions.installUpdate(),
+				onToggleMobile: (on) => void actions.toggleMobile(on),
+				onLeaveStation: () => void actions.stopStation(),
 			});
 			// ---- v3.0.2 workspace: device rail on the left, tasks on the right ----
 			const deviceList = [
@@ -1717,7 +1849,7 @@ window.__ModuleLoader__.load({
 			);
 
 			if (state.view === 'reader') {
-				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, el(ReaderView, { t, state, onBack: actions.closeReader, onSend: actions.sendPrompt, onInherit: actions.inheritSession }));
+				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, el(ReaderView, { t, state, onBack: actions.closeReader, onSend: actions.sendPrompt, onInherit: actions.inheritSession, onPane: (pane) => store.update((draft) => { draft.readerPane = pane === 'trajectory' ? 'trajectory' : 'dialogue'; }) }));
 			}
 			if (state.status === 'loading' && self === null) {
 				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, div('dc_loading', t('loading')));
@@ -1901,6 +2033,7 @@ window.__ModuleLoader__.load({
 			'.dc_switch{border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer;flex:none;width:34px;height:20px;padding:2px;display:flex;align-items:center;transition:background .15s}.dc_switchKnob{background:var(--dsw-alias-label-primary-inverted, var(--dsw-alias-bg-base));border-radius:999px;width:16px;height:16px;transition:transform .15s;display:block}.dc_switchOn{background:var(--dsw-alias-state-success-primary)}.dc_switchOn .dc_switchKnob{transform:translateX(14px)}',
 			'.dc_devices{flex-direction:column;gap:4px;margin:0;padding:0;list-style:none;display:flex}.dc_devItemWrap{margin:0;padding:0}.dc_devItem{width:100%;border:.5px solid transparent;border-radius:var(--dsw-radius-lg);background:0 0;color:var(--dsw-alias-label-secondary);text-align:left;cursor:pointer;align-items:center;gap:7px;padding:7px 9px;font:inherit;font-size:12.5px;line-height:18px;display:flex}.dc_devItem:hover{background:var(--dsw-alias-interactive-bg-hover)}.dc_devItemOn{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-interactive-bg-active,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-primary)}.dc_devDot{border-radius:999px;flex:none;width:8px;height:8px;background:var(--dsw-alias-label-caption)}.dc_devDotOn{background:var(--dsw-alias-state-success-primary)}.dc_devDotOff{background:var(--dsw-alias-state-error-primary)}.dc_devName{text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;overflow:hidden}.dc_devMeta{color:var(--dsw-alias-label-caption);flex:none;font-size:10.5px}',
 			'.dc_main{min-width:0;flex:1;padding:10px 16px;overflow:auto}.dc_detail{gap:6px}.dc_taskBoard{flex-wrap:wrap;gap:6px;display:flex}.dc_taskChips{flex-wrap:wrap;gap:6px;display:flex}.dc_chipOpen{color:var(--dsw-alias-state-warn-primary)}.dc_chipDone{color:var(--dsw-alias-state-success-primary)}.dc_badgeWarn{color:var(--dsw-alias-state-warn-primary)}',
+			'.dc_mobile{flex-direction:column;align-items:flex-start;gap:8px;display:flex}.dc_qr{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-base);width:180px;height:180px}',
 			'.dc_taskList{flex-direction:column;gap:6px;margin:8px 0 10px;padding:0;list-style:none;display:flex}.dc_taskItem{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:3px;padding:8px 10px;display:flex}.dc_taskHead{align-items:center;gap:8px;display:flex}.dc_taskTitle{color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;font-size:12px;line-height:18px;overflow:hidden}.dc_taskItems{flex-direction:column;gap:2px;display:flex}.dc_taskLine{align-items:center;gap:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;display:flex}.dc_taskLineDone{color:var(--dsw-alias-label-caption);text-decoration:line-through}.dc_taskDot{border-radius:999px;background:var(--dsw-alias-state-warn-primary);flex:none;width:6px;height:6px}.dc_taskLineDone .dc_taskDot{background:var(--dsw-alias-state-success-primary)}.dc_taskText{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.dc_readerTasks{border-top:.5px solid var(--dsw-alias-border-l1);flex-direction:column;gap:4px;margin:8px 20px 0;padding-top:8px;display:flex}',
 			'.dc_command{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:6px;margin:6px 0 10px;padding:10px}.dc_commandRow{flex-direction:row;gap:8px;display:flex}.dc_rowAction{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:0 0;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;align-self:center;margin-right:8px;padding:4px 8px;font:inherit;font-size:11px;line-height:16px}.dc_rowAction:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
 			'@media (max-width:720px){.dc_factValue{max-width:60vw}.dc_head{flex-wrap:wrap}.dc_rail{width:168px}.dc_workspace{flex-direction:column}.dc_rail{border-right:0;border-bottom:.5px solid var(--dsw-alias-border-l1);width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.dc_devices{flex-direction:row;flex-wrap:wrap}}',
