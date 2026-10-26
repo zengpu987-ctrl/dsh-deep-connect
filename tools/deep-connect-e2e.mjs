@@ -448,6 +448,28 @@ try {
   check(stored !== undefined && stored.events.some((event) => event.type === 'todo/write'), 'todo events survived the copy');
   check(stored !== undefined && stored.header.isSeeded === false && typeof stored.header.version === 'number', 'the header is a valid ordinary session header');
 
+  section('v3: station surface, invite links, version compare');
+  check(listA.version === '3.0.0' && listA.protocol === 3 && listA.edition === 'Pro', `the panel reports v3 Pro (${listA.version}/${listA.protocol}/${listA.edition})`);
+  check(listA.station !== null && typeof listA.station === 'object' && listA.station.link === '', 'a machine with no station reports an empty station');
+  check(listA.update !== null && typeof listA.update === 'object' && listA.update.current === '3.0.0', 'the update block reports the current version');
+  const { parseStationLink, stationLink } = await import('../plugin/host/station.js');
+  const invite = stationLink('https://abc-def.trycloudflare.com', 'invite-token-0123456789');
+  const parsed = parseStationLink(invite);
+  check(parsed.baseUrl === 'https://abc-def.trycloudflare.com', 'the invite link round-trips its address');
+  check(parsed.token === 'invite-token-0123456789', 'the invite token rides in the fragment');
+  const bare = parseStationLink('abc-def.trycloudflare.com#invite-token-0123456789');
+  check(bare.baseUrl === 'https://abc-def.trycloudflare.com', 'a link without a scheme is still accepted');
+  let rejected = false;
+  try {
+    parseStationLink('https://abc-def.trycloudflare.com');
+  } catch {
+    rejected = true;
+  }
+  check(rejected, 'a link without the invite token is rejected');
+  check(apiA.compareVersion('3.0.1', '3.0.0') === 1, '3.0.1 is newer than 3.0.0');
+  check(apiA.compareVersion('v2.9.9', '3.0.0') === -1, 'v2.9.9 is older than 3.0.0');
+  check(apiA.compareVersion('3.0.0', '3.0.0') === 0, 'equal versions compare equal');
+
   section('settings round-trip');
   const configured = await apiB.command({ action: 'configure', deviceName: 'B 机（改名）', secret: 'my-shared-passphrase' });
   check(configured.self.name === 'B 机（改名）', 'the display name persisted');

@@ -395,6 +395,33 @@ window.__ModuleLoader__.load({
 			inheritHint: '继承 = 把这条会话的完整事件复制成一条本机会话，用本机模型和工具接着干；原会话仍留在 {name} 上。',
 			syncDone: '全文已同步 {n}/{m}',
 			syncRunning: '正在同步全文…',
+			proBadge: 'Pro',
+			stationTitle: '中继站',
+			stationIntro: '一台设备生成中继站，把链接发给其它设备，粘贴进来点「加入」即可互通。链接里带着邀请令牌，谁拿到链接谁就能加入。',
+			stationGenerate: '一键生成中继站',
+			stationGenerating: '正在生成中继站…（首次大约十几秒）',
+			stationLink: '邀请链接',
+			stationCopy: '复制链接',
+			stationCopied: '已复制',
+			stationPublic: '公网可达（Cloudflare 隧道）',
+			stationLan: '仅同一局域网可加入（没找到 cloudflared）',
+			stationHosted: '本机正在托管这个中继站',
+			stationJoined: '已加入 {url}',
+			stationStop: '停止中继站',
+			stationStopped: '中继站已停止',
+			stationJoinTitle: '加入别人的中继站',
+			stationJoinPlaceholder: '把另一台设备生成的链接粘贴到这里',
+			stationJoin: '加入',
+			stationJoining: '正在加入…',
+			stationHint: '链接就是邀请：请通过可信渠道发送，拿到链接的人都能加入。',
+			updateTitle: '版本更新',
+			updateAvailable: '有新版本 v{latest}（当前 v{current}）',
+			updateCommand: '升级命令',
+			updateCheck: '检查更新',
+			updateChecking: '正在检查…',
+			updateUpToDate: '已是最新版本 v{current}',
+			updateUnknown: '暂时无法检查更新（{error}）',
+			updateCopy: '复制命令',
 			settingsTitle: '连接设置',
 			settingsRelay: '中继地址',
 			settingsRelayHint: '例如 wss://relay.example.com，两端必须填同一个。',
@@ -410,8 +437,8 @@ window.__ModuleLoader__.load({
 			settingsAutoConnectHint: 'DSH 启动后自动连上中继，不必手动点「重新连接」。',
 			settingsCipher: '中继只会看到密文：它拿到的是一条哈希过的频道号和一串 AES-256-GCM 密文，推不出密钥，也读不到对话正文。',
 			settingsNotice: '密钥指纹是两端核对身份的唯一依据：只有一致，才说明两台机器推出了同一把密钥。',
-			unconfiguredTitle: '还没有连接中继',
-			unconfiguredBody: '这里还没有可以显示的数据。先在两台机器上都填入同一个中继地址，并确认两台机器登录的是同一个 DeepSeek 账号：账号相同 → 两边各自在本机推出同一把密钥 → 中继只负责转交密文。填好并保存后，本页会在几秒内出现对方的设备与会话索引。',
+			unconfiguredTitle: '还没有中继站',
+			unconfiguredBody: '在一台设备上点「一键生成中继站」，把生成的链接复制到另一台设备的「加入别人的中继站」里，两边就会出现在同一个中继站里。链接就是邀请：请通过可信渠道发送，拿到链接的人都能加入。',
 			errorUnknown: '未知错误',
 			errorLoad: '读取互联状态失败',
 			errorNetwork: '连接本机 Host 失败',
@@ -492,6 +519,33 @@ window.__ModuleLoader__.load({
 			inheritHint: 'Inherit copies this conversation’s full event log into a new local session so this machine’s model and tools continue the work; the original stays on {name}.',
 			syncDone: 'Bodies synced {n}/{m}',
 			syncRunning: 'Syncing conversation bodies…',
+			proBadge: 'Pro',
+			stationTitle: 'Relay station',
+			stationIntro: 'One device creates a station and sends the link; every other device pastes it and clicks Join. The invite token lives in the link, so whoever holds the link can join.',
+			stationGenerate: 'Create a relay station',
+			stationGenerating: 'Creating the station… (about ten seconds)',
+			stationLink: 'Invite link',
+			stationCopy: 'Copy link',
+			stationCopied: 'Copied',
+			stationPublic: 'Reachable from anywhere (Cloudflare tunnel)',
+			stationLan: 'LAN only (cloudflared not found)',
+			stationHosted: 'This machine is hosting the station',
+			stationJoined: 'Joined {url}',
+			stationStop: 'Stop station',
+			stationStopped: 'Station stopped',
+			stationJoinTitle: 'Join a station',
+			stationJoinPlaceholder: 'Paste the link another device generated',
+			stationJoin: 'Join',
+			stationJoining: 'Joining…',
+			stationHint: 'The link is the invitation: send it over a channel you trust; anyone with it can join.',
+			updateTitle: 'Updates',
+			updateAvailable: 'v{latest} is available (you have v{current})',
+			updateCommand: 'Upgrade command',
+			updateCheck: 'Check for updates',
+			updateChecking: 'Checking…',
+			updateUpToDate: 'Up to date (v{current})',
+			updateUnknown: 'Could not check for updates ({error})',
+			updateCopy: 'Copy command',
 			settingsTitle: 'Connection settings',
 			settingsRelay: 'Relay URL',
 			settingsRelayHint: 'For example wss://relay.example.com — both machines must use the same one.',
@@ -507,8 +561,8 @@ window.__ModuleLoader__.load({
 			settingsAutoConnectHint: 'Reach the relay as soon as DSH starts, without pressing Reconnect.',
 			settingsCipher: 'The relay only ever sees ciphertext: a hashed channel id and AES-256-GCM frames. It cannot derive the key and cannot read a conversation.',
 			settingsNotice: 'The key fingerprint is the only proof of identity: only a match means both machines derived the same key.',
-			unconfiguredTitle: 'No relay configured yet',
-			unconfiguredBody: 'There is nothing to show yet. Put the same relay URL on both machines and make sure both are signed in to the same DeepSeek account: same account → each machine derives the same key locally → the relay only forwards ciphertext. Save it below and the other machine’s devices and session index appear here within seconds.',
+			unconfiguredTitle: 'No relay station yet',
+			unconfiguredBody: 'On one device click “Create a relay station”, then paste the link into “Join a station” on the other device; both end up in the same station. The link is the invitation — send it over a channel you trust.',
 			errorUnknown: 'Unknown error',
 			errorLoad: 'Could not read the connection state',
 			errorNetwork: 'Could not reach the local Host',
@@ -608,6 +662,9 @@ window.__ModuleLoader__.load({
 					draft.peers = Array.isArray(value.peers) ? value.peers.filter((peer) => peer !== null && typeof peer === 'object') : [];
 					draft.sessions = Array.isArray(value.sessions) ? value.sessions.filter((row) => row !== null && typeof row === 'object') : [];
 					draft.stats = value.stats !== null && typeof value.stats === 'object' ? value.stats : null;
+					draft.version = typeof value.version === 'string' ? value.version : '';
+					draft.station = value.station !== null && typeof value.station === 'object' ? value.station : null;
+					draft.update = value.update !== null && typeof value.update === 'object' ? value.update : null;
 					draft.error = null;
 				});
 			}
@@ -849,9 +906,87 @@ window.__ModuleLoader__.load({
 				}
 			}
 
+			/** Generate a station here, then adopt the returned view. */
+			async function createStation() {
+				store.update((draft) => { draft.pending = true; draft.error = null; });
+				try {
+					const value = await request({ action: 'station-create' });
+					if (disposed) return false;
+					const view = value.view !== null && typeof value.view === 'object' ? value.view : null;
+					if (view !== null) publish(view);
+					store.update((draft) => {
+						draft.pending = false;
+						draft.sent = { text: t('stationHosted'), mode: 'system', at: Date.now() };
+					});
+					return true;
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; draft.error = messageOf(error, t); });
+					return false;
+				}
+			}
+
+			/** Join a station from a pasted invite link. */
+			async function joinStation(link) {
+				const text = typeof link === 'string' ? link.trim() : '';
+				if (text === '') return false;
+				store.update((draft) => { draft.pending = true; draft.error = null; });
+				try {
+					const value = await request({ action: 'station-join', link: text });
+					if (disposed) return false;
+					const view = value.view !== null && typeof value.view === 'object' ? value.view : null;
+					if (view !== null) publish(view);
+					const base = typeof value.station?.baseUrl === 'string' ? value.station.baseUrl : '';
+					store.update((draft) => {
+						draft.pending = false;
+						draft.sent = { text: t('stationJoined').replace('{url}', base), mode: 'system', at: Date.now() };
+					});
+					return true;
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; draft.error = messageOf(error, t); });
+					return false;
+				}
+			}
+
+			/** Stop hosting and go back to the unconfigured state. */
+			async function stopStation() {
+				store.update((draft) => { draft.pending = true; draft.error = null; });
+				try {
+					const value = await request({ action: 'station-stop' });
+					if (disposed) return false;
+					if (value !== null && typeof value === 'object') publish(value);
+					store.update((draft) => {
+						draft.pending = false;
+						draft.sent = { text: t('stationStopped'), mode: 'system', at: Date.now() };
+					});
+					return true;
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; draft.error = messageOf(error, t); });
+					return false;
+				}
+			}
+
+			/** Ask the Host to look for a newer release, then refresh the view. */
+			async function checkUpdate(force) {
+				store.update((draft) => { draft.pending = true; draft.error = null; });
+				try {
+					await request({ action: 'update-check', force: force === true });
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; });
+					await load(true);
+					return true;
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => { draft.pending = false; draft.error = messageOf(error, t); });
+					return false;
+				}
+			}
+
 			return {
 				store,
-				actions: { load, openReader, closeReader, reloadHistory, toggleSettings, configure, reconnect, sendPrompt, inheritSession },
+				actions: { load, openReader, closeReader, reloadHistory, toggleSettings, configure, reconnect, sendPrompt, inheritSession, createStation, joinStation, stopStation, checkUpdate },
 				/** Whether this controller can still publish (the poll reads it). */
 				isDisposed: () => disposed,
 				dispose() {
@@ -908,40 +1043,88 @@ window.__ModuleLoader__.load({
 		 * The settings section, rendered inline so the unconfigured empty state
 		 * can offer exactly the same fields without a second implementation.
 		 */
-		function SettingsSection({ t, self, pending, onSave }) {
-			const [relayUrl, setRelayUrl] = React.useState(typeof self?.relayUrl === 'string' ? self.relayUrl : '');
-			const [token, setToken] = React.useState('');
-			const [secret, setSecret] = React.useState('');
+		function SettingsSection({ t, self, station, update, version, pending, onSave, onGenerate, onJoin, onStop, onCheckUpdate }) {
 			const [deviceName, setDeviceName] = React.useState(typeof self?.name === 'string' ? self.name : '');
 			const [autoIndex, setAutoIndex] = React.useState(true);
 			const [autoConnect, setAutoConnect] = React.useState(true);
+			const [joinLink, setJoinLink] = React.useState('');
+			const [copied, setCopied] = React.useState('');
 			const fingerprint = typeof self?.fingerprint === 'string' ? self.fingerprint : '';
+			const link = typeof station?.link === 'string' ? station.link : '';
+			const role = typeof station?.role === 'string' ? station.role : '';
+			const running = station?.running === true;
+			const reach = station?.public === true ? t('stationPublic') : t('stationLan');
+			const copy = async (text, key) => {
+				try {
+					await navigator.clipboard.writeText(text);
+					setCopied(key);
+				} catch {
+					setCopied('');
+				}
+			};
+			const updateOutdated = update?.outdated === true;
 			return h(
 				'section',
 				{ className: 'dc_settings', 'data-dc': 'settings' },
 				h('h2', { className: 'dc_sectionTitle' }, t('settingsTitle')),
 				div(
-					'dc_settingsGrid',
-					el(Field, { t, name: 'settingsRelay', hint: 'settingsRelayHint', value: relayUrl, placeholder: 'wss://relay.example.com', onChange: setRelayUrl }),
-					el(Field, { t, name: 'settingsToken', hint: 'settingsTokenHint', value: token, onChange: setToken }),
-					el(Field, { t, name: 'settingsSecret', hint: 'settingsSecretHint', value: secret, onChange: setSecret }),
-					el(Field, { t, name: 'settingsDeviceName', hint: 'settingsDeviceNameHint', value: deviceName, onChange: setDeviceName }),
+					'dc_station',
+					h('h3', { className: 'dc_stationTitle' }, t('stationTitle'), span('dc_badge', `v${version ?? ''}`, { title: t('proBadge') })),
+					para('dc_fieldHint', t('stationIntro')),
+					link === ''
+						? button('dc_primary', pending ? t('stationGenerating') : t('stationGenerate'), () => void onGenerate(), { disabled: pending })
+						: div(
+							'dc_stationLink',
+							span('dc_fieldLabel', t('stationLink')),
+							h('input', { className: 'dc_input dc_mono', type: 'text', value: link, readOnly: true, 'aria-label': t('stationLink') }),
+							div(
+								'dc_stationRow',
+								button('dc_ghost', copied === 'link' ? t('stationCopied') : t('stationCopy'), () => void copy(link, 'link')),
+								role === 'host' && running ? button('dc_ghost', t('stationStop'), () => void onStop()) : null,
+								span('dc_fieldHint', reach),
+							),
+						),
+					link === '' ? para('dc_fieldHint', t('stationHint')) : null,
+					h('h3', { className: 'dc_stationTitle' }, t('stationJoinTitle')),
+					div(
+						'dc_stationRow',
+						h('input', {
+							className: 'dc_input', type: 'text', value: joinLink,
+							placeholder: t('stationJoinPlaceholder'), 'aria-label': t('stationJoinTitle'),
+							onChange: (event) => setJoinLink(event.target.value),
+						}),
+						button('dc_primary', pending ? t('stationJoining') : t('stationJoin'), () => void onJoin(joinLink), { disabled: pending || joinLink.trim() === '' }),
+					),
 				),
+				div('dc_settingsGrid', el(Field, { t, name: 'settingsDeviceName', hint: 'settingsDeviceNameHint', value: deviceName, onChange: setDeviceName })),
 				div(
 					'dc_settingsRow',
 					el(Toggle, { t, name: 'settingsAutoIndex', hint: 'settingsAutoIndexHint', value: autoIndex, onChange: setAutoIndex }),
 					el(Toggle, { t, name: 'settingsAutoConnect', hint: 'settingsAutoConnectHint', value: autoConnect, onChange: setAutoConnect }),
 				),
-				div('dc_settingsRow dc_settingsRowEnd', button('dc_primary', pending ? t('saving') : t('save'), () => onSave({
-					relayUrl, token, secret, deviceName, autoIndex, autoConnect,
-				}), { disabled: pending })),
+				div('dc_settingsRow dc_settingsRowEnd', button('dc_primary', pending ? t('saving') : t('save'), () => onSave({ deviceName, autoIndex, autoConnect }), { disabled: pending })),
+				h('h3', { className: 'dc_stationTitle' }, t('updateTitle')),
+				updateOutdated
+					? div(
+						'dc_update',
+						span('dc_updateText', t('updateAvailable').replace('{latest}', String(update?.latest ?? '')).replace('{current}', String(update?.current ?? version ?? ''))),
+						span('dc_fieldLabel', t('updateCommand')),
+						h('input', { className: 'dc_input dc_mono', type: 'text', value: String(update?.command ?? ''), readOnly: true }),
+						div('dc_stationRow',
+							button('dc_ghost', copied === 'update' ? t('stationCopied') : t('updateCopy'), () => void copy(String(update?.command ?? ''), 'update')),
+							button('dc_ghost', t('updateCheck'), () => void onCheckUpdate?.(true)),
+						),
+					)
+					: div(
+						'dc_stationRow',
+						span('dc_fieldHint', update?.error !== undefined && update?.error !== '' ? t('updateUnknown').replace('{error}', String(update.error)) : t('updateUpToDate').replace('{current}', String(update?.current ?? version ?? ''))),
+						button('dc_ghost', t('updateCheck'), () => void onCheckUpdate?.(true)),
+					),
 				para('dc_note', t('settingsCipher')),
 				h(
 					'p',
 					{ className: 'dc_note dc_noteStrong' },
 					`${t('settingsNotice')} `,
-					// The fingerprint is the one value the user compares across
-					// machines, so it is printed in full rather than truncated.
 					fingerprint === '' ? null : span('dc_mono dc_fingerprint', fingerprint, { 'data-dc': 'fingerprint', title: fingerprint }),
 				),
 			);
@@ -1186,11 +1369,19 @@ window.__ModuleLoader__.load({
 				{ className: 'dc_head', 'data-window-drag': true },
 				div(
 					'dc_headMain',
-					h('h1', { className: 'dc_title' }, t('title')),
+					h(
+						'h1',
+						{ className: 'dc_title' },
+						t('title'),
+						span('dc_badge dc_badgePro', `v${state.version ?? ''} ${t('proBadge')}`, { title: t('proBadge') }),
+						state.update?.outdated === true
+							? span('dc_badge dc_badgeUpdate', t('updateAvailable').replace('{latest}', String(state.update.latest ?? '')).replace('{current}', String(state.update.current ?? state.version ?? '')), { title: t('updateTitle') })
+							: null,
+					),
 					span(
 						'dc_headFacts',
 						el(Fact, { label: t('thisDevice'), value: deviceName }),
-						el(Fact, { label: t('relay'), value: relayUrl, title: String(self?.relayUrl ?? '') }),
+						el(Fact, { label: t('stationTitle'), value: relayUrl, title: String(self?.relayUrl ?? '') }),
 						el(Fact, { label: t('fingerprint'), value: fingerprint === '' ? '—' : shortOf(fingerprint, 24), title: fingerprint, mono: true }),
 					),
 					el(StatusPill, { state: pills, t }),
@@ -1218,7 +1409,19 @@ window.__ModuleLoader__.load({
 					span('dc_errorText', `${t('errorLoad')} · ${state.error}`),
 					button('dc_link', t('retry'), () => void actions.load(false)),
 				);
-			const settings = el(SettingsSection, { t, self, pending: state.pending === true, onSave: (patch) => void actions.configure(patch) });
+			const settings = el(SettingsSection, {
+				t,
+				self,
+				station: state.station,
+				update: state.update,
+				version: state.version,
+				pending: state.pending === true,
+				onSave: (patch) => void actions.configure(patch),
+				onGenerate: () => void actions.createStation(),
+				onJoin: (link) => void actions.joinStation(link),
+				onStop: () => void actions.stopStation(),
+				onCheckUpdate: (force) => void actions.checkUpdate(force),
+			});
 			const groupsView = groups.map((group) => h(
 				'section',
 				{ className: 'dc_section', key: `group:${group.deviceId}`, 'data-dc': 'group' },

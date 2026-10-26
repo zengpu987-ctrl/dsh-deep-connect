@@ -1,8 +1,8 @@
-# Deep Connect
+# Deep Connect Pro
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-同一个 DeepSeek 账号登录的多台 DSH，通过一个云端中继互相看得见：
+多台 DSH 通过**一键生成的中继站**互相看得见（v3 Pro 起不再依赖账号或手填地址）：
 
 - **会话索引互见** —— 每台机器把本地会话的索引（标题、时间、消息数、最近几句提问、任务计数）
   加密广播给同账号的其它设备。
@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v2.0.0/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.0/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -69,7 +69,7 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v2.0.0/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.0/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -77,28 +77,34 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v2.0.0/in
 
 非默认 profile（如 `web`）加 `PROFILE=web`；DSH 装在别处加 `DSH_HOME=/path/to/.dsh`。
 
-### 2. 起一个中继
+### 2. 一键生成中继站（v3 Pro）
 
-任选一台两台机器都够得着的电脑（局域网 / VPN / 云主机都行）。仓库已经在
-`~/.dsh/plugins/dsh-deep-connect` 下，或者在本仓库目录里：
+装好并重启 Harness 后，左侧 **Deep Connect Pro** 面板里只有两件事：
 
-```bash
-~/.dsh/plugins/dsh-deep-connect/relay/install.sh
-```
+1. 在**任意一台**设备上点 **「一键生成中继站」**。本机会起一个中继进程；
+   机器上有 `cloudflared` 时会顺手开一条 Cloudflare 快速隧道，于是得到一个
+   **公网可达**的邀请链接；没有 `cloudflared` 就退化成**局域网链接**（面板会明说）。
+2. 在**另一台**设备的「加入别人的中继站」里粘贴这条链接，点**加入**。两台设备就在同一个中继站里了。
 
-它会打印另一台机器该填的地址。云端部署（Cloudflare / Deno / VPS）见
-[relay/DEPLOY.md](relay/DEPLOY.md)。
+> 链接形如 `https://xxxx.trycloudflare.com#<邀请令牌>`。令牌在 URL 的 `#` 后面——
+> 浏览器和 WebSocket 都不会把它发给服务器，中继只看到频道哈希和密文。
+> **链接就是邀请函**：谁拿到链接谁就能加入，请通过可信渠道发送。
 
-### 3. 在面板里把两边接起来
+想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
+在面板里改填那条地址即可，协议与中继站完全一样。
 
-1. 每台机器重启 Harness，左侧边栏出现 **Deep Connect** 图标。
-2. 打开面板 → **设置** → 填**中继地址**（`install.sh` 打印的那个）。
-3. 保存后看**密钥指纹**：两台机器必须显示**同一个 6 位指纹**。
-   - 指纹一致 = 两台机器推算出同一把密钥 = 确实登录了同一个账号。
-   - 指纹不一致 = 一台没登录，或者口令填得不一样。
+---
 
-不用手动配对，也不用扫码：**账号就是共享秘密**。想让这个前提不成立（例如不想让账号 id
-参与推导），在两台机器上填**同一句口令**即可，口令会替代账号 id 作为密钥来源。
+## v3.0.0 Pro：一键中继站、旧版失效、自动检查更新
+
+- **中继站取代旧互联方式。** 不再需要在两台机器上填同一个中继地址、也不再靠账号或口令
+  推出共享密钥：一台设备生成中继站，另一台粘贴链接加入。邀请令牌就是密钥输入。
+- **3.0.0 Pro 以下全部失效。** 协议升到 v3：频道/密钥的域分隔符、AAD 里的版本号都变了，
+  v2 客户端连帧都解不开；中继站还要求升级请求带 `proto=3`，旧客户端直接吃 `426 Upgrade Required`。
+  旧版不是"被劝退"，而是**在协议层被拒绝**。
+- **插件内自动检查更新。** Host 每 6 小时（面板首开也会查一次）向 GitHub 要最新 release，
+  面板顶部出现「有新版本 vX」时，设置里会给出可直接复制的升级命令。
+- **图标改成两台电脑相连**（`plugin/icon.svg`）。
 
 ---
 
@@ -122,8 +128,8 @@ v2 把「点开才拉」变成「一出现就同步」：
 > 单条上限 12 MB（中继单帧 16 MB），超了会明确拒绝而不是悄悄截断。
 > 本机没挂载 `sessionPersistence` 的部署会直接说明无法继承。
 
-发版检查：`node tools/deep-connect-e2e.mjs` 覆盖了自动全文同步、缓存优先读取、
-继承落地这三条新路径（76 项），`relay-smoke`（32 项）与 `client-check`（80 项）不变。
+发版检查：`node tools/station-smoke.mjs` 真起一个中继站（relay 子进程 + cloudflared 隧道）并验证令牌、`proto=3` 门禁与邀请链接往返；`node tools/deep-connect-e2e.mjs` 覆盖了自动全文同步、缓存优先读取、
+继承落地这三条新路径（76 项），`relay-smoke`（35 项）与 `client-check`（81 项）不变。
 
 
 ---
@@ -193,7 +199,7 @@ v2 把「点开才拉」变成「一出现就同步」：
 | 部分 | 状态 |
 |---|---|
 | 中继 `relay/relay.cjs` | ✅ 端到端验证，32 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱与重连排空、半开连接离场、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
-| Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，76 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、**设备一出现就自动全文同步**、**缓存优先读取**、**继承成本机会话且事件逐条重排**、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
+| Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，86 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、**设备一出现就自动全文同步**、**缓存优先读取**、**继承成本机会话且事件逐条重排**、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
 | 浏览器半渲染 | ✅ 80 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
 | `deep-connect/relay/cloudflare` | ⚠️ **未运行过**（本机 `workers.dev` 被污染且没有账号）。按官方 API 写，首次 `wrangler deploy` 才是真测试 |
 | `deep-connect/relay/deno` | ⚠️ **未运行过**。同上，协议与 `relay.cjs` 一致 |
@@ -201,9 +207,10 @@ v2 把「点开才拉」变成「一出现就同步」：
 跑测试：
 
 ```bash
-node tools/relay-smoke.mjs        # 中继（32 项）
-node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（76 项）
-node tools/client-check.mjs       # 浏览器半（80 项）
+node tools/relay-smoke.mjs        # 中继（35 项）
+node tools/station-smoke.mjs      # 一键中继站：真起 relay + cloudflared（12 项）
+node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（86 项）
+node tools/client-check.mjs       # 浏览器半（81 项）
 node ../tools/browser/check-connect.mjs   # 真机 GUI：面板真的渲染出来（需 GUI 在 19387 运行）
 ```
 
@@ -286,6 +293,7 @@ bag 之前的 children 全部保留、child 位上的对象被丢弃、渲染失
 
 ```bash
 node tools/relay-smoke.mjs
+node tools/station-smoke.mjs
 node tools/deep-connect-e2e.mjs
 node tools/client-check.mjs
 ```

@@ -36,8 +36,12 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 
-/** Bumping this invalidates every stored key and requires a re-pair; it is also mixed into the KDF salt. */
-export const PROTOCOL_VERSION = 1;
+/** Bumping this invalidates every stored key and requires a re-pair; it is also mixed into the KDF salt.
+ * v3 is the "Pro" wire: stations (invite links), forced upgrade, and the new
+ * channel/key domain separators. v1/v2 clients cannot decode a v3 frame at all,
+ * which is how "older versions are invalid" is enforced on the wire rather than
+ * by asking politely. */
+export const PROTOCOL_VERSION = 3;
 /** PBKDF2 cost. Chosen so a phone-class device derives in well under a second. */
 const PBKDF2_ITERATIONS = 210_000;
 /** AES-256-GCM: 12-byte nonce, 16-byte tag. */

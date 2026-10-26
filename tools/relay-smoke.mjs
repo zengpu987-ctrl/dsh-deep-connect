@@ -462,6 +462,18 @@ try {
   }).then((r) => r.json());
   check(recoveredMail.messages.some((m) => m.id === 'pre-restart'), 'undelivered mail survives a relay restart on disk');
   await relay3.stop();
+
+  section('a station relay refuses pre-v3 clients');
+  const protoRelay = createRelay({ host: '127.0.0.1', port: 0, requireProto: 3 });
+  const protoPort = await protoRelay.start();
+  const protoBase = `http://127.0.0.1:${protoPort}`;
+  const v2Channel = 'c'.repeat(64);
+  const oldClient = await fetch(`${protoBase}/v1/devices?channel=${v2Channel}`);
+  check(oldClient.status === 426, 'a v2 client is refused with 426');
+  check((await oldClient.json()).error === 'upgrade-required', 'the refusal names the upgrade explicitly');
+  const newClient = await fetch(`${protoBase}/v1/devices?channel=${v2Channel}&proto=3`);
+  check(newClient.status === 200, 'a v3 client is admitted');
+  await protoRelay.stop();
 } finally {
   try {
     await relay.stop();

@@ -19,7 +19,7 @@
  *
  * @module dsh-deep-connect/relay
  */
-import { channelFor, open as openFrame, seal, frameId } from './crypto.js';
+import { channelFor, open as openFrame, seal, frameId, PROTOCOL_VERSION } from './crypto.js';
 
 /** Reconnect backoff bounds, in milliseconds. */
 const BACKOFF_MIN_MS = 1000;
@@ -31,12 +31,13 @@ const SEEN_LIMIT = 2000;
 /** Default liveness probe cadence. The relay answers every `ping` with a `pong`. */
 const DEFAULT_HEARTBEAT_MS = 20_000;
 
-/** Add `channel` (and `token`) to a relay URL as query parameters. */
+/** Add `channel`, `token` and the wire protocol to a relay URL as query parameters. */
 export function relayUrlWithChannel(baseUrl, channel, token) {
   const url = new URL(baseUrl);
   if (url.protocol === 'http:') url.protocol = 'ws:';
   else if (url.protocol === 'https:') url.protocol = 'wss:';
   url.searchParams.set('channel', channel);
+  url.searchParams.set('proto', String(PROTOCOL_VERSION));
   if (token !== '') url.searchParams.set('token', token);
   return url.toString();
 }

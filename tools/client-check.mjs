@@ -439,22 +439,29 @@ const blank = await renderPanel(makeFetch({
   listValue: { self: { ...SELF, relayUrl: '', connected: false, channelShort: '', fingerprint: '' }, peers: [], sessions: [], stats: { local: 0, remote: 0, peers: 0 } },
 }));
 const blankHtml = serialize(blank.tree);
-check('unconfigured panel explains the fix in one paragraph', blankHtml.includes('还没有连接中继') && blankHtml.includes('同一个 DeepSeek 账号'));
+check('unconfigured panel explains the station flow in one paragraph', blankHtml.includes('还没有中继站') && blankHtml.includes('一键生成中继站'));
 check('unconfigured panel offers the settings form + ciphertext warning', blankHtml.includes('data-dc="settings"') && blankHtml.includes('中继只会看到密文'));
 check('unconfigured dot is shown', blankHtml.includes('dc_dot_unconfigured') && blankHtml.includes('未配置'));
-const relayInput = find(blank.tree, (node) => node.type === 'input' && node.props.type === 'text' && node.props['aria-label'] === '中继地址');
-check('settings form has a relay URL input', relayInput !== null);
-check('settings form has a 保存 button', find(blank.tree, (node) => node.type === 'button' && textOf(node) === '保存') !== null);
-relayInput?.props.onChange({ target: { value: 'wss://relay.example.com' } });
+check('settings form offers a one-click station button', find(blank.tree, (node) => node.type === 'button' && textOf(node) === '一键生成中继站') !== null);
+const joinInput = find(blank.tree, (node) => node.type === 'input' && node.props.type === 'text' && node.props['aria-label'] === '加入别人的中继站');
+check('settings form offers a station join input', joinInput !== null);
+const deviceInput = find(blank.tree, (node) => node.type === 'input' && node.props.type === 'text' && node.props['aria-label'] === '这台设备的名称');
+deviceInput?.props.onChange({ target: { value: 'MacBook Pro' } });
 blank.renderer.render();
 // Re-read the button: the closure it carries must come from the post-edit render.
 const saveButton = find(blank.renderer.render(), (node) => node.type === 'button' && textOf(node) === '保存');
-process.stdout.write('DIAG relay input value after edit: ' + JSON.stringify(find(blank.renderer.render(), (n) => n.type === 'input' && n.props?.['aria-label'] === '中继地址')?.props?.value) + '\n');
 saveButton?.props?.onClick({});
 await settle();
 const configureCall = globalThis.fetch.calls.find((b) => b.action === 'configure');
-check('saving posts configure with the edited relay URL', configureCall?.relayUrl === 'wss://relay.example.com', JSON.stringify(configureCall));
-check('saving omits empty optional fields', configureCall?.token === undefined && configureCall?.secret === undefined, JSON.stringify(configureCall));
+check('saving posts configure with the edited device name', configureCall?.deviceName === 'MacBook Pro', JSON.stringify(configureCall));
+check('v3 settings no longer post a relay URL', configureCall?.relayUrl === undefined, JSON.stringify(configureCall));
+joinInput?.props?.onChange?.({ target: { value: 'https://station.example.com#invite-token-0123456789' } });
+blank.renderer.render();
+const joinButton = find(blank.renderer.render(), (node) => node.type === 'button' && textOf(node) === '加入');
+joinButton?.props?.onClick({});
+await settle();
+const joinCall = globalThis.fetch.calls.find((b) => b.action === 'station-join');
+check('joining posts station-join with the pasted link', joinCall?.link === 'https://station.example.com#invite-token-0123456789', JSON.stringify(joinCall));
 
 /* ---------------------------------------------------------------- 8. errors */
 const down = await renderPanel(makeFetch({ networkFail: true }));

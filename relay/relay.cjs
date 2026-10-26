@@ -146,6 +146,8 @@ function createRelay(options = {}) {
   const port = Number(options.port ?? 8790);
   const statePath = options.statePath ?? '';
   const requiredToken = options.token ?? '';
+  /** Reject any client that does not speak at least this Deep Connect protocol. */
+  const requireProto = Math.max(0, Number(options.requireProto ?? 0));
   const mailboxLimit = Math.max(1, Number(options.mailboxLimit ?? 512));
   const ttlMs = Math.max(1000, Number(options.ttlMs ?? 7 * 24 * 3600 * 1000));
 
@@ -412,6 +414,12 @@ function createRelay(options = {}) {
       sendJson(res, 401, { error: 'token-required' });
       return undefined;
     }
+    if (requireProto > 0 && Number(url.searchParams.get('proto') ?? req.headers['x-dsh-connect-proto'] ?? 0) < requireProto) {
+      // A v2 client has no idea what a station is; refuse it loudly instead of
+      // letting it join a room it cannot decode.
+      sendJson(res, 426, { error: 'upgrade-required', minProto: requireProto });
+      return undefined;
+    }
     return channel;
   }
 
@@ -515,6 +523,10 @@ function createRelay(options = {}) {
     const key = req.headers['sec-websocket-key'];
     if (requiredToken !== '' && token !== requiredToken) {
       socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      return;
+    }
+    if (requireProto > 0 && Number(url.searchParams.get('proto') ?? req.headers['x-dsh-connect-proto'] ?? 0) < requireProto) {
+      socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nX-DC-Min-Proto: ' + requireProto + '\r\n\r\n');
       return;
     }
     if (!/^[0-9a-f]{32,128}$/.test(channel) || typeof key !== 'string') {
@@ -625,12 +637,13 @@ function parseArgs(argv) {
     else if (arg === '--host') options.host = next();
     else if (arg === '--state') options.statePath = path.resolve(next());
     else if (arg === '--token') options.token = next();
+    else if (arg === '--require-proto') options.requireProto = Number(next());
     else if (arg === '--mailbox') options.mailboxLimit = Number(next());
     else if (arg === '--ttl-days') options.ttlMs = Number(next()) * 24 * 3600 * 1000;
     else if (arg === '--help' || arg === '-h') {
       process.stdout.write(
         'dsh-connect-relay [--port 8790] [--host 0.0.0.0] [--state ./relay-state.json]\n' +
-          '                  [--token <shared-secret>] [--mailbox 512] [--ttl-days 7]\n',
+          '                  [--token <shared-secret>] [--require-proto 3] [--mailbox 512] [--ttl-days 7]\n',
       );
       process.exit(0);
     }

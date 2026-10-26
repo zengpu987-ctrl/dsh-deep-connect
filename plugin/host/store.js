@@ -131,6 +131,13 @@ export class DeepConnectStore {
       autoIndex: this.config.autoIndex !== false,
       indexIntervalMs: Math.max(5000, Number(this.config.indexIntervalMs ?? 15000)),
       historyLimitEvents: Math.max(200, Number(this.config.historyLimitEvents ?? 20000)),
+      // v3 station fields. `stationRole` is 'host' when this machine generated
+      // the station, 'join' when this machine pasted a link.
+      stationUrl: String(this.config.stationUrl ?? ''),
+      stationToken: String(this.config.stationToken ?? ''),
+      stationRole: this.config.stationRole === 'host' ? 'host' : this.config.stationRole === 'join' ? 'join' : '',
+      lastUpdateCheckAt: Number(this.config.lastUpdateCheckAt ?? 0),
+      latestVersion: String(this.config.latestVersion ?? ''),
     };
   }
 
@@ -138,7 +145,7 @@ export class DeepConnectStore {
   async setConfig(patch) {
     return this.#serial(async () => {
       const next = { ...this.config };
-      for (const key of ['relayUrl', 'token', 'secret', 'deviceName']) {
+      for (const key of ['relayUrl', 'token', 'secret', 'deviceName', 'stationUrl', 'stationToken', 'stationRole', 'latestVersion']) {
         if (patch[key] !== undefined) next[key] = String(patch[key]);
       }
       for (const key of ['autoConnect', 'autoIndex']) {
@@ -146,6 +153,9 @@ export class DeepConnectStore {
       }
       if (patch.indexIntervalMs !== undefined) {
         next.indexIntervalMs = Math.max(5000, Number(patch.indexIntervalMs) || 15000);
+      }
+      if (patch.lastUpdateCheckAt !== undefined) {
+        next.lastUpdateCheckAt = Number(patch.lastUpdateCheckAt) || 0;
       }
       next.version = DOC_VERSION;
       this.config = next;

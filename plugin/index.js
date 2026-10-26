@@ -29,9 +29,17 @@ import { RelayClient } from './host/relay.js';
 import { DeepConnectStore } from './host/store.js';
 import { SessionAdapter } from './host/sessions.js';
 import { createInheritedSession } from './host/inherit.js';
+import { RelayStation, parseStationLink, stationLink, findCloudflared } from './host/station.js';
 import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_VERSION } from './host/crypto.js';
 
 export const name = 'deep-connect';
+
+/** The version shown in the panel and compared against GitHub releases. */
+export const PLUGIN_VERSION = '3.0.0';
+/** GitHub repository the updater asks about. */
+const UPDATE_REPO = 'zengpu987-ctrl/dsh-deep-connect';
+/** Check at most this often unless the user asks explicitly. */
+const UPDATE_INTERVAL_MS = 6 * 3600 * 1000;
 
 /**
  * Every service this plugin reads directly. `sessionQuery` and
@@ -70,6 +78,10 @@ export function apply(ctx, config) {
     token: String(config?.token ?? ''),
     secret: String(config?.secret ?? ''),
     deviceName: String(config?.deviceName ?? ''),
+    // v3 station mode: an invite link is the only thing a human copies.
+    stationUrl: String(config?.stationUrl ?? ''),
+    stationToken: String(config?.stationToken ?? ''),
+    stationRole: config?.stationRole === 'host' ? 'host' : config?.stationRole === 'join' ? 'join' : '',
     autoConnect: config?.autoConnect !== false,
     autoIndex: config?.autoIndex !== false,
     indexIntervalMs: Math.max(5000, Number(config?.indexIntervalMs ?? 15000)),
@@ -96,7 +108,9 @@ export function apply(ctx, config) {
   /** In-memory runtime state; nothing here is secret enough to need encryption at rest beyond the key itself. */
   const state = {
     key: undefined,
-    /** Which secret the current key came from: 'account' | 'passphrase' | undefined. */
+    /** The exact string the current key was derived from (station token, passphrase or account id). */
+    keySecret: '',
+    /** Which secret the current key came from: 'station' | 'account' | 'passphrase' | undefined. */
     keySource: undefined,
     /** The account id the current key was derived from, so a sign-out is noticed. */
     accountId: undefined,
@@ -115,6 +129,11 @@ export function apply(ctx, config) {
     /** Per-session sync bookkeeping for the panel: key -> {at, ok, error}. */
     syncState: new Map(),
     syncedAt: 0,
+    /** A station this machine is currently hosting (v3). */
+    station: undefined,
+    stationError: '',
+    updateInfo: undefined,
+    updateCheckedAt: 0,
     started: false,
   };
 
@@ -160,9 +179,22 @@ export function apply(ctx, config) {
    * @returns {Promise<{ok: boolean, reason?: string}>}
    */
   async function establishKey() {
+    // v3: a station invite token is the primary secret. Every machine that
+    // pasted the same link derives the same key, and a machine that never saw
+    // the link cannot join even if it guesses the URL.
+    const stationToken = settings.stationToken.trim();
+    if (stationToken !== '') {
+      state.key = await deriveKeyPbkdf2(stationToken);
+      state.keySecret = stationToken;
+      state.keySource = 'station';
+      state.accountId = undefined;
+      log('info', `已用中继站邀请令牌派生密钥，指纹 ${fingerprint(state.key)}`);
+      return { ok: true };
+    }
     const configured = settings.secret.trim();
     if (configured !== '') {
       state.key = await deriveKeyPbkdf2(configured);
+      state.keySecret = configured;
       state.keySource = 'passphrase';
       state.accountId = undefined;
       log('info', `已用口令派生密钥，指纹 ${fingerprint(state.key)}`);
@@ -172,10 +204,12 @@ export function apply(ctx, config) {
     if (accountId === undefined) {
       state.key = undefined;
       state.keySource = undefined;
+      state.keySecret = '';
       return { ok: false, reason: 'signed-out' };
     }
     state.accountId = accountId;
     state.key = await deriveKeyPbkdf2(accountId);
+    state.keySecret = accountId;
     state.keySource = 'account';
     log('info', `已用账号身份派生密钥，指纹 ${fingerprint(state.key)}`);
     return { ok: true };
@@ -549,6 +583,156 @@ export function apply(ctx, config) {
     return rows.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   }
 
+  /* ------------------------------ stations (v3) ------------------------------ */
+
+  /** The panel's view of the station this machine is hosting or joined. */
+  function stationView() {
+    const live = state.station?.describe();
+    const url = settings.stationUrl;
+    const token = settings.stationToken;
+    return {
+      role: settings.stationRole,
+      url,
+      token,
+      link: url !== '' && token !== '' ? stationLink(url, token) : '',
+      running: live?.running === true,
+      public: live?.public === true,
+      lanUrl: live?.lanUrl ?? '',
+      startedAt: Number(live?.startedAt ?? 0),
+      error: state.stationError !== '' ? state.stationError : (live?.error ?? ''),
+    };
+  }
+
+  /** Re-derive the key and restart the relay link after a station change. */
+  async function applyStationConfig() {
+    await establishKey();
+    state.relay?.restart({
+      key: state.key,
+      relayUrl: settings.relayUrl,
+      token: settings.token,
+      secret: state.keySecret,
+      deviceName: settings.deviceName,
+    });
+  }
+
+  /** Generate a station on this machine and join it. */
+  async function createStation(preferPublic) {
+    const cloudflared = await findCloudflared();
+    if (cloudflared === undefined) {
+      state.stationError = '没有找到 cloudflared：中继站只会在同一局域网内可加入';
+    } else {
+      state.stationError = '';
+    }
+    if (state.station === undefined) state.station = new RelayStation({ root, log });
+    const result = await state.station.start({ preferPublic: preferPublic && cloudflared !== undefined });
+    settings.stationUrl = result.baseUrl;
+    settings.stationToken = result.token;
+    settings.stationRole = 'host';
+    // The host dials its own relay over loopback; `stationUrl` (the link) keeps
+    // the shareable address for everyone else.
+    settings.relayUrl = result.localUrl !== '' ? result.localUrl : result.baseUrl;
+    settings.token = result.token;
+    await store.setConfig({
+      stationUrl: settings.stationUrl,
+      stationToken: settings.stationToken,
+      stationRole: 'host',
+      relayUrl: settings.relayUrl,
+      token: settings.token,
+    });
+    await applyStationConfig();
+    log('info', `中继站已建立（${result.public ? '公网' : '局域网'}）：${result.baseUrl}`);
+    return { ...result, link: stationLink(result.baseUrl, result.token) };
+  }
+
+  /** Join a station another machine generated. */
+  async function joinStation(linkText) {
+    const parsed = parseStationLink(linkText);
+    await state.station?.stop().catch(() => undefined);
+    state.station = undefined;
+    state.stationError = '';
+    settings.stationUrl = parsed.baseUrl;
+    settings.stationToken = parsed.token;
+    settings.stationRole = 'join';
+    settings.relayUrl = parsed.baseUrl;
+    settings.token = parsed.token;
+    await store.setConfig({
+      stationUrl: settings.stationUrl,
+      stationToken: settings.stationToken,
+      stationRole: 'join',
+      relayUrl: settings.relayUrl,
+      token: settings.token,
+    });
+    await applyStationConfig();
+    log('info', `已加入中继站：${parsed.baseUrl}`);
+    return { baseUrl: parsed.baseUrl, role: 'join' };
+  }
+
+  /** Stop hosting and forget the station. */
+  async function stopStation() {
+    await state.station?.stop().catch(() => undefined);
+    state.station = undefined;
+    state.stationError = '';
+    settings.stationUrl = '';
+    settings.stationToken = '';
+    settings.stationRole = '';
+    settings.relayUrl = '';
+    settings.token = '';
+    await store.setConfig({ stationUrl: '', stationToken: '', stationRole: '', relayUrl: '', token: '' });
+    await applyStationConfig();
+  }
+
+  /* ------------------------------ self-update ------------------------------ */
+
+  /** Numeric segment comparison; `3.0.1` > `3.0.0`, `v` prefixes are ignored. */
+  function compareVersion(a, b) {
+    const parse = (value) => String(value).replace(/^v/i, '').split(/[-+.]/).map((part) => Number.parseInt(part, 10)).filter((part) => Number.isFinite(part));
+    const left = parse(a);
+    const right = parse(b);
+    const length = Math.max(left.length, right.length);
+    for (let index = 0; index < length; index += 1) {
+      const diff = (left[index] ?? 0) - (right[index] ?? 0);
+      if (diff !== 0) return diff > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  /** Ask GitHub for the latest release. Never throws: the panel answers "unknown". */
+  async function checkUpdate(force) {
+    const persisted = store.getConfig();
+    const last = Math.max(state.updateCheckedAt, Number(persisted.lastUpdateCheckAt ?? 0));
+    if (!force && state.updateInfo !== undefined && Date.now() - last < UPDATE_INTERVAL_MS) return state.updateInfo;
+    const info = {
+      current: PLUGIN_VERSION,
+      latest: '',
+      outdated: false,
+      url: '',
+      command: '',
+      checkedAt: Date.now(),
+      error: '',
+    };
+    try {
+      const response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+        headers: { accept: 'application/vnd.github+json', 'user-agent': `dsh-deep-connect/${PLUGIN_VERSION}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) throw new Error(`GitHub 返回 HTTP ${response.status}`);
+      const body = await response.json();
+      const latest = String(body.tag_name ?? '').replace(/^v/, '');
+      info.latest = latest;
+      info.url = typeof body.html_url === 'string' ? body.html_url : '';
+      info.outdated = latest !== '' && compareVersion(latest, PLUGIN_VERSION) > 0;
+      info.command = latest === ''
+        ? ''
+        : `curl -fsSL https://cdn.jsdelivr.net/gh/${UPDATE_REPO}@v${latest}/install.sh | bash`;
+    } catch (error) {
+      info.error = error instanceof Error ? error.message : String(error);
+    }
+    state.updateInfo = info;
+    state.updateCheckedAt = info.checkedAt;
+    await store.setConfig({ lastUpdateCheckAt: info.checkedAt, latestVersion: info.latest }).catch(() => undefined);
+    return info;
+  }
+
   /** The panel's read model. */
   async function buildListView() {
     const identity = store.getIdentity();
@@ -581,6 +765,19 @@ export function apply(ctx, config) {
       },
       peers,
       sessions: rows,
+      version: PLUGIN_VERSION,
+      protocol: PROTOCOL_VERSION,
+      edition: 'Pro',
+      station: stationView(),
+      update: state.updateInfo ?? {
+        current: PLUGIN_VERSION,
+        latest: '',
+        outdated: false,
+        url: '',
+        command: '',
+        checkedAt: Number(store.getConfig().lastUpdateCheckAt ?? 0),
+        error: '',
+      },
       stats: {
         local: rows.filter((row) => row.isRemote !== true).length,
         remote: rows.filter((row) => row.isRemote === true).length,
@@ -627,7 +824,7 @@ export function apply(ctx, config) {
       state.relay?.restart({
         relayUrl: settings.relayUrl,
         token: settings.token,
-        secret: settings.secret,
+        secret: state.keySecret,
         key: state.key,
         deviceName: settings.deviceName,
       });
@@ -642,7 +839,7 @@ export function apply(ctx, config) {
       if (!established.ok && established.reason === 'signed-out') {
         return { ok: true, warning: 'signed-out' };
       }
-      state.relay?.restart({ key: state.key, relayUrl: settings.relayUrl, token: settings.token, secret: settings.secret });
+      state.relay?.restart({ key: state.key, relayUrl: settings.relayUrl, token: settings.token, secret: state.keySecret });
       return { ok: true };
     }
 
@@ -755,6 +952,25 @@ export function apply(ctx, config) {
       };
     }
 
+    if (action === 'station-create') {
+      const station = await createStation(body.public !== false);
+      return { station, view: await buildListView() };
+    }
+
+    if (action === 'station-join') {
+      const station = await joinStation(String(body.link ?? ''));
+      return { station, view: await buildListView() };
+    }
+
+    if (action === 'station-stop') {
+      await stopStation();
+      return buildListView();
+    }
+
+    if (action === 'update-check') {
+      return checkUpdate(body.force === true);
+    }
+
     if (action === 'forget-peer') {
       const deviceId = String(body.deviceId ?? '');
       if (deviceId === '') throw badRequest('deviceId is required');
@@ -828,7 +1044,34 @@ export function apply(ctx, config) {
     void (async () => {
       await store.load().catch((e) => { throw new Error("store.load: " + e.message); });
       const persisted = store.getConfig();
-      settings.relayUrl = settings.relayUrl || persisted.relayUrl;
+      // v3: a station is the only normal way in. The legacy `relayUrl`/`secret`
+      // pair still works when a deployment passes it explicitly (tests, a VPS
+      // operator editing the Loader row); the panel no longer offers it.
+      settings.stationUrl = settings.stationUrl || persisted.stationUrl;
+      settings.stationToken = settings.stationToken || persisted.stationToken;
+      settings.stationRole = settings.stationRole || persisted.stationRole;
+      if (settings.stationRole === 'host') {
+        // The relay AND its quick tunnel were children of the previous process,
+        // so this address is dead. Do not dial a URL that cannot answer; ask for
+        // a fresh station instead.
+        settings.stationUrl = '';
+        settings.stationToken = '';
+        settings.stationRole = '';
+        settings.relayUrl = '';
+        settings.token = '';
+        state.stationError = '本机上次生成的中继站已随进程停止：请重新生成，并把新链接发给其他设备';
+        await store.setConfig({ stationUrl: '', stationToken: '', stationRole: '', relayUrl: '', token: '' }).catch(() => undefined);
+      } else if (settings.stationToken !== '') {
+        settings.relayUrl = settings.stationUrl;
+        settings.token = settings.stationToken;
+      } else if (String(config?.relayUrl ?? '').trim() === '') {
+        // No station, no explicit relay: stay offline and let the panel show the
+        // two station buttons instead of silently dialing a stale legacy URL.
+        settings.relayUrl = '';
+        settings.token = '';
+      }
+      // No relayUrl fallback: under v3 a missing station must stay offline, not
+      // resurrect the pre-v3 address that no v3 peer can talk to.
       settings.token = settings.token || persisted.token;
       settings.secret = settings.secret || persisted.secret;
       settings.deviceName = settings.deviceName || persisted.deviceName || '';
@@ -844,7 +1087,7 @@ export function apply(ctx, config) {
         store,
         key: state.key,
         heartbeatMs: settings.heartbeatMs,
-        secret: settings.secret !== '' ? settings.secret : (state.accountId ?? ''),
+        secret: state.keySecret,
         token: settings.token,
         relayUrl: settings.relayUrl,
         deviceName: settings.deviceName,
@@ -894,16 +1137,23 @@ export function apply(ctx, config) {
       ctx.interval(() => {
         void publishIndex();
       }, settings.indexIntervalMs);
+      // v3: ask GitHub once in the background. A failure is silent here; the
+      // panel still shows the checked timestamp and "无法检查更新" when asked.
+      setTimeout(() => {
+        void checkUpdate(false).catch(() => undefined);
+      }, 5_000).unref?.();
     })().catch((error) => log('warn', `Deep Connect 启动失败：${error instanceof Error ? error.message : String(error)}`));
     return () => {
       state.started = false;
       state.relay?.stop();
       state.relay = undefined;
+      void state.station?.stop().catch(() => undefined);
+      state.station = undefined;
     };
   }, 'deep-connect: relay lifecycle');
 
   /* Exposed for the offline test harness: it drives a real plugin instance with
    * a stub context and asserts on these, which is the only way to test this
    * half without booting the whole Harness. */
-  return { command, publishIndex, store, sessions, state, buildListView, queuePeerSync, runSyncQueue, serveExport };
+  return { command, publishIndex, store, sessions, state, buildListView, queuePeerSync, runSyncQueue, serveExport, compareVersion, checkUpdate };
 }

@@ -1,18 +1,16 @@
 # Profile layer of the Deep Connect bundle.
 #
-# One Host row that owns the relay socket, derives the frame key from the
-# signed-in account, indexes this machine's conversations, and answers both the
-# browser panel and the peer machines.
+# One Host row that owns the relay socket, indexes this machine's conversations,
+# and answers both the browser panel and the peer machines.
 #
-# `relayUrl` is the address of the relay you deployed (see ../relay/DEPLOY.md).
-# Leaving it empty keeps the plugin loaded but offline: the panel then explains
-# what to set, and nothing is transmitted anywhere.
+# v3 (Pro) is station-based: the panel creates a relay station on one machine and
+# hands out an invite link; every other device pastes the link and joins. The
+# station's invite token is the key input, so nothing is derived from an account
+# and nothing has to be typed on the second machine.
 #
-# `secret` is optional. Left empty — the normal case — the frame key is derived
-# from the signed-in DeepSeek account, so every machine on that account agrees
-# without sharing anything. Set the SAME passphrase on every machine to key the
-# room from a passphrase instead, which is what you want if you would rather not
-# have the account identifier be the input.
+# `relayUrl` / `secret` are the pre-v3 fields. They still load for migration, but
+# the panel no longer shows them: a station or, failing that, the signed-in
+# account decides the room.
 - insert:
     - id: deep-connect
       name: '@local/dsh-deep-connect'
@@ -26,7 +24,7 @@
         secret: !!js process.env.DSH_DEEP_CONNECT_SECRET ?? ''
         # How often the index is rebuilt and broadcast, in milliseconds.
         indexIntervalMs: 15000
-        # Pull every peer conversation body as soon as a peer appears (v2).
+        # Pull every peer conversation body as soon as a peer appears.
         # Set to false to go back to fetch-on-click.
         autoSyncHistory: true
         # Upper bound on sessions auto-pulled per peer index broadcast.
