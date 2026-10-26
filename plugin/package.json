@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-deep-connect",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Deep Connect for the DeepSeek Harness Web UI: several DSH installs signed in to the same DeepSeek account meet through a cloud relay and share their conversations and task boards, with the relay seeing ciphertext only.",
   "type": "module",

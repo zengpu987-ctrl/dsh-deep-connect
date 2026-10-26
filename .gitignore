@@ -20,3 +20,6 @@ paper/.mpl/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Local relay runtime state (device mailboxes; never part of the project)
+.relay-state/

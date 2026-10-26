@@ -389,6 +389,12 @@ window.__ModuleLoader__.load({
 			sentSteer: '已插话到运行中的对话',
 			composerOffline: '{name} 当前离线，无法投喂：等它上线后再发送。',
 			composerHint: '发送 = 排队下一条；插话 = 送进正在运行的这一轮。',
+			inherit: '继承到本机',
+			inheriting: '正在继承…',
+			inheritedToast: '已继承为本机会话 {id}（{n} 条事件），刷新会话列表即可继续',
+			inheritHint: '继承 = 把这条会话的完整事件复制成一条本机会话，用本机模型和工具接着干；原会话仍留在 {name} 上。',
+			syncDone: '全文已同步 {n}/{m}',
+			syncRunning: '正在同步全文…',
 			settingsTitle: '连接设置',
 			settingsRelay: '中继地址',
 			settingsRelayHint: '例如 wss://relay.example.com，两端必须填同一个。',
@@ -480,6 +486,12 @@ window.__ModuleLoader__.load({
 			sentSteer: 'Interjected into the running turn',
 			composerOffline: '{name} is offline right now — wait until it is back before sending.',
 			composerHint: 'Send queues the next turn; Interject reaches the turn that is running now.',
+			inherit: 'Inherit here',
+			inheriting: 'Inheriting…',
+			inheritedToast: 'Inherited as local session {id} ({n} events) — refresh the session list to continue it',
+			inheritHint: 'Inherit copies this conversation’s full event log into a new local session so this machine’s model and tools continue the work; the original stays on {name}.',
+			syncDone: 'Bodies synced {n}/{m}',
+			syncRunning: 'Syncing conversation bodies…',
 			settingsTitle: 'Connection settings',
 			settingsRelay: 'Relay URL',
 			settingsRelayHint: 'For example wss://relay.example.com — both machines must use the same one.',
@@ -796,9 +808,50 @@ window.__ModuleLoader__.load({
 				}
 			}
 
+			/**
+			 * Inherit the open (remote) conversation as a new local session.
+			 *
+			 * The Host asks the owner for its raw event log and writes a fresh
+			 * local session from it; the owner's conversation is untouched.
+			 * @returns whether the Host created the local session.
+			 */
+			async function inheritSession() {
+				const reader = store.getSnapshot().reader;
+				if (reader === null) return false;
+				store.update((draft) => {
+					draft.pending = true;
+					draft.error = null;
+					draft.sent = null;
+				});
+				try {
+					const value = await request({ action: 'inherit', deviceId: reader.deviceId, sessionId: reader.sessionId });
+					if (disposed) return false;
+					const id = typeof value.sessionId === 'string' ? value.sessionId : '';
+					store.update((draft) => {
+						draft.pending = false;
+						draft.sent = {
+							text: t('inheritedToast').replace('{id}', shortOf(id, 22)).replace('{n}', String(count(value.eventCount ?? 0))),
+							mode: 'system',
+							at: Date.now(),
+							inherited: id,
+						};
+					});
+					// The new session is local; rebuild the merged view so it appears.
+					await load(true);
+					return true;
+				} catch (error) {
+					if (disposed) return false;
+					store.update((draft) => {
+						draft.pending = false;
+						draft.error = messageOf(error, t);
+					});
+					return false;
+				}
+			}
+
 			return {
 				store,
-				actions: { load, openReader, closeReader, reloadHistory, toggleSettings, configure, reconnect, sendPrompt },
+				actions: { load, openReader, closeReader, reloadHistory, toggleSettings, configure, reconnect, sendPrompt, inheritSession },
 				/** Whether this controller can still publish (the poll reads it). */
 				isDisposed: () => disposed,
 				dispose() {
@@ -982,7 +1035,7 @@ window.__ModuleLoader__.load({
 		 * The reader: the session's title, its full transcript, and the composer
 		 * that hands a prompt to the machine owning the conversation.
 		 */
-		function ReaderView({ t, state, onBack, onSend }) {
+		function ReaderView({ t, state, onBack, onSend, onInherit }) {
 			// One open/closed flag per turn key, so collapsing is per tool call.
 			const [openTools, setOpenTools] = React.useState({});
 			const [draft, setDraft] = React.useState('');
@@ -990,6 +1043,7 @@ window.__ModuleLoader__.load({
 			const reader = state.reader !== null && typeof state.reader === 'object' ? state.reader : null;
 			const owner = reader === null ? '' : reader.deviceId;
 			const online = owner !== '' && isDeviceOnline(owner, state.self, state.peers);
+			const remote = owner !== '' && owner !== state.self?.deviceId;
 			const ownerName = owner === ''
 				? ''
 				: owner === state.self?.deviceId
@@ -1056,6 +1110,7 @@ window.__ModuleLoader__.load({
 						span(
 							'dc_composerActions',
 							sent === null ? null : span('dc_sent', sent.text, { role: 'status' }),
+							remote ? button('dc_ghost', busy ? t('inheriting') : t('inherit'), () => void onInherit(), { disabled: busy || !online, title: t('inheritHint').replace('{name}', ownerName) }) : null,
 							button('dc_ghost', t('steer'), () => void composed('steer', () => setDraft('')), { disabled: !online || busy || draft.trim() === '' }),
 							button('dc_primary', busy ? t('sending') : t('send'), () => void composed('queue', () => setDraft('')), { disabled: !online || busy || draft.trim() === '' }),
 						),
@@ -1185,7 +1240,7 @@ window.__ModuleLoader__.load({
 			));
 
 			if (state.view === 'reader') {
-				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, el(ReaderView, { t, state, onBack: actions.closeReader, onSend: actions.sendPrompt }));
+				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, el(ReaderView, { t, state, onBack: actions.closeReader, onSend: actions.sendPrompt, onInherit: actions.inheritSession }));
 			}
 			if (state.status === 'loading' && self === null) {
 				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, div('dc_loading', t('loading')));

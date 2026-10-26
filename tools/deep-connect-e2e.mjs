@@ -72,7 +72,7 @@ function makeSession({ id, title, cwd, texts, tasks }) {
   for (const task of tasks?.team ?? []) {
     events.push({ type: 'team/task', seq: seq++, time: 1_700_000_200_200, data: { version: 2, teamId: 'team-1', task: task } });
   }
-  return { header: { id, createdAt: 1_700_000_000_000, cwd, isSeeded: false }, live: false, persisted: true, events };
+  return { header: { version: 4, id, createdAt: 1_700_000_000_000, cwd, isSeeded: false }, live: false, persisted: true, events };
 }
 
 /**
@@ -82,6 +82,8 @@ function makeSession({ id, title, cwd, texts, tasks }) {
 function makeStubContext({ accountId, sessions, prompts, log }) {
   const routes = [];
   const listeners = [];
+  /** Sessions the plugin itself wrote (inheritance lands here). */
+  const written = [];
   const services = {
     sessions: { list: () => sessions.filter((s) => s.live).map((s) => ({ id: s.header.id })) },
     sessionQuery: {
@@ -96,6 +98,42 @@ function makeStubContext({ accountId, sessions, prompts, log }) {
         if (found === undefined) return undefined;
         const title = [...found.events].reverse().find((e) => e.type === 'session/title');
         return title === undefined ? undefined : { session: found.header, title: { title: title.data.title, messageSeqs: [], source: { kind: 'user' }, eventSeq: title.seq, updatedAt: title.time } };
+      },
+    },
+    // Just enough of the durable store for the inherit path: create + append +
+    // flush + close, plus list/stat for version discovery.
+    sessionPersistence: {
+      list: async () => written.map((session) => ({ header: session.header, revision: `rev-${session.events.length}`, eventCount: session.events.length })),
+      stat: async (id) => {
+        const found = written.find((session) => session.header.id === id);
+        return found === undefined ? undefined : { header: found.header, revision: `rev-${found.events.length}`, eventCount: found.events.length };
+      },
+      open: async (id) => {
+        const found = written.find((session) => session.header.id === id);
+        if (found === undefined) throw new Error(`no stored session ${id}`);
+        return {
+          id,
+          header: found.header,
+          inheritedEventCount: 0,
+          access: 'read',
+          read: async () => ({ eventState: 'detached', events: [...found.events] }),
+          close: async () => {},
+        };
+      },
+      create: async (header) => {
+        const session = { header, events: [] };
+        written.push(session);
+        return {
+          id: header.id,
+          header,
+          inheritedEventCount: 0,
+          access: 'write',
+          append: async (events) => {
+            session.events.push(...events);
+          },
+          flush: async () => {},
+          close: async () => {},
+        };
       },
     },
     deepseekAccount: {
@@ -136,7 +174,7 @@ function makeStubContext({ accountId, sessions, prompts, log }) {
       return undefined;
     },
   };
-  return { ctx, routes, listeners, services };
+  return { ctx, routes, listeners, services, written };
 }
 
 /* ------------------------------- run ------------------------------- */
@@ -379,6 +417,36 @@ try {
     tampered[tampered.length - 1] ^= 0x01;
     check(open(key, envelope, tampered.toString('base64')) === undefined, 'flipping one ciphertext bit fails the tag check');
   }
+
+  section('every peer conversation body is pulled automatically');
+  const peerId = listA.peers[0]?.deviceId;
+  const synced = await until(async () => {
+    const value = await apiA.command({ action: 'list' });
+    return value.stats.remoteWithCopy >= 1 && value.stats.syncRunning !== true ? value : undefined;
+  }, { timeoutMs: 20_000, what: `A to pull B's conversation body (remoteWithCopy=${listA.stats.remoteWithCopy})` });
+  const syncedPeerId = synced.peers[0]?.deviceId ?? peerId;
+  check(typeof syncedPeerId === 'string' && syncedPeerId !== '', 'A knows which device the copy came from');
+  const gammaRow = synced.sessions.find((row) => row.isRemote === true && row.sessionId === 'session-gamma');
+  check(synced.stats.remoteWithCopy >= 1, 'A reports at least one peer body on disk');
+  check(gammaRow !== undefined && gammaRow.hasCopy === true, "B's conversation is cached on A without anyone clicking it");
+  check(synced.stats.remote === 1, 'A still lists exactly the one peer session');
+
+  section('a cached body opens without a live round trip');
+  const cachedHistory = await apiA.command({ action: 'history', deviceId: syncedPeerId, sessionId: 'session-gamma' });
+  check(cachedHistory.fromCache === true, 'the reader is served from the local copy');
+  check(Array.isArray(cachedHistory.transcript) && cachedHistory.transcript.length >= 4, 'the local copy carries the whole transcript');
+  check(cachedHistory.tasks !== undefined, 'the task board came with the copy');
+
+  section('inheriting a conversation as a local session');
+  const inherited = await apiB.command({ action: 'inherit', deviceId: listA.self.deviceId, sessionId: 'session-alpha' });
+  check(typeof inherited.sessionId === 'string' && inherited.sessionId.startsWith('session-'), 'the Host minted a local session id');
+  check(inherited.eventCount === sessionsA[0].events.length, "every source event crossed the wire");
+  const stored = hostB.written.find((session) => session.header.id === inherited.sessionId);
+  check(stored !== undefined, 'the new session was written through sessionPersistence');
+  check(stored !== undefined && stored.events.length === sessionsA[0].events.length, 'the stored log has the same number of events');
+  check(stored !== undefined && stored.events[0]?.seq === 0 && stored.events.at(-1)?.seq === stored.events.length - 1, 'sequence numbers are re-based to 0..n-1');
+  check(stored !== undefined && stored.events.some((event) => event.type === 'todo/write'), 'todo events survived the copy');
+  check(stored !== undefined && stored.header.isSeeded === false && typeof stored.header.version === 'number', 'the header is a valid ordinary session header');
 
   section('settings round-trip');
   const configured = await apiB.command({ action: 'configure', deviceName: 'B 机（改名）', secret: 'my-shared-passphrase' });

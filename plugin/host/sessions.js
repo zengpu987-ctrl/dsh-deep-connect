@@ -265,7 +265,18 @@ export class SessionAdapter {
       try {
         const snapshot = await this.query.readSession(sessionId);
         const events = Array.isArray(snapshot?.events) ? snapshot.events : [];
-        return { events, inheritedEventCount: Number(snapshot?.inheritedEventCount ?? 0), title: titleFromEvents(events) };
+        // The reader has been observed with the header under all three of these
+        // shapes; take whichever this deployment actually returns.
+        const header =
+          snapshot?.header ??
+          snapshot?.session?.header ??
+          (typeof snapshot?.session?.version === 'number' ? snapshot.session : undefined);
+        return {
+          events,
+          header,
+          inheritedEventCount: Number(snapshot?.inheritedEventCount ?? 0),
+          title: titleFromEvents(events),
+        };
       } catch (error) {
         this.log('warn', `readSession(${sessionId}) failed: ${error instanceof Error ? error.message : String(error)}`);
         return undefined;
@@ -277,7 +288,12 @@ export class SessionAdapter {
         handle = await this.persistence.open(sessionId, 'read', { signal });
         const result = await handle.read(0, undefined, { signal });
         const events = Array.isArray(result?.events) ? [...result.events] : [];
-        return { events, inheritedEventCount: Number(handle.inheritedEventCount ?? 0), title: titleFromEvents(events) };
+        return {
+          events,
+          header: handle.header,
+          inheritedEventCount: Number(handle.inheritedEventCount ?? 0),
+          title: titleFromEvents(events),
+        };
       } catch (error) {
         this.log('warn', `open(${sessionId}) failed: ${error instanceof Error ? error.message : String(error)}`);
         return undefined;
@@ -400,6 +416,7 @@ export class SessionAdapter {
       eventCount: read.events.length,
       truncated: read.events.length > events.length,
       tasks: foldTasks(read.events),
+      updatedAt: latestTime(read.events, 0),
       transcript: buildTranscript(events),
     };
   }

@@ -6,12 +6,14 @@
 
 - **会话索引互见** —— 每台机器把本地会话的索引（标题、时间、消息数、最近几句提问、任务计数）
   加密广播给同账号的其它设备。
-- **完整对话可读** —— 点开对端某条会话，读到完整正文（user / assistant / tool 全量），
-  并留一份本地副本，之后离线也能看。
+- **完整对话可读** —— 对端一出现，索引里的每条会话正文都会被自动拉下来（v2），
+  点开即读、离线可看。
 - **任务状态一致** —— todo / goal / 团队任务本身就是会话日志里的事件，跟着会话一起同步，
   索引行上直接显示「待办 N / 完成 N / 目标 / 团队 N」。
 - **可接管** —— 在 B 机给 A 机开着的会话发消息。真正干活的是 A 机（模型、工具、文件都在 A 上），
   B 机看着结果。**一条会话永远只有一台机器在写**，所以只追加的事件日志不会分叉。
+- **可继承** —— 也可以把 A 的会话连同完整事件日志搬成 B 上的一条新会话，用 B 的模型和工具
+  接着干；A 上那条原样保留。
 - **中继只见密文** —— 密钥由两台机器各自从同一个账号本地推导，从不上传。
 
 ```
@@ -40,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v2.0.0/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -67,7 +69,7 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v2.0.0/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -98,6 +100,31 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/in
 不用手动配对，也不用扫码：**账号就是共享秘密**。想让这个前提不成立（例如不想让账号 id
 参与推导），在两台机器上填**同一句口令**即可，口令会替代账号 id 作为密钥来源。
 
+---
+
+## v2.0.0：出现彼此设备后立即全文同步，并且可继承
+
+v2 把「点开才拉」变成「一出现就同步」：
+
+- **自动全文同步**：只要对端出现在设备列表里，本机就把它索引里的**每一条会话正文**
+  排队拉下来（`autoSyncHistory`，默认开），存进 `~/.dsh/deep-connect/remote/<设备>/`。
+  列表行的 `hasCopy` 就是「这条正文已经在本机了」；离线也能照常阅读。
+  一条只按 `(eventCount, updatedAt)` 变化过的会话才会重拉，稳定语料不产生流量。
+- **打开即读**：阅读器先读本地副本，只有副本过期才发一次网络请求。
+- **继承到本机**：阅读对端会话时，右下角的 **「继承到本机」** 会把那条会话的
+  **原始事件日志**（不是摘要）经中继加密搬过来，用本机的 `sessionPersistence`
+  落成一条**新的本地会话**，然后就能用本机的模型和工具接着干。原会话仍留在对端，
+  两边各自追加，不会分叉。
+- **接管仍在**：输入框发送 / 插话仍然是把消息交给拥有会话的那台机器执行
+  （`sessionController.prompt`），适合「让那台机器继续跑」。
+
+> 「继承」写的是真会话：新会话出现在普通会话列表里，可 resume、可改名、可继续。
+> 单条上限 12 MB（中继单帧 16 MB），超了会明确拒绝而不是悄悄截断。
+> 本机没挂载 `sessionPersistence` 的部署会直接说明无法继承。
+
+发版检查：`node tools/deep-connect-e2e.mjs` 覆盖了自动全文同步、缓存优先读取、
+继承落地这三条新路径（76 项），`relay-smoke`（32 项）与 `client-check`（80 项）不变。
+
 
 ---
 
@@ -109,7 +136,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/in
 | 设置 | 中继地址、访问令牌（可选）、共享口令（可选）、设备名、自动同步索引、保存 |
 | 设备 | 每台对端：名字、设备 id、在线徽标、最后在线时间、会话数 |
 | 会话 | 「本机」与每台对端一组：标题、相对时间、会话 id、事件数、cwd、任务标签、最后一句提问预览 |
-| 阅读 | 点开任一条：完整正文，工具调用可折叠、报错的工具红色显示；底部可继续对话 |
+| 阅读 | 点开任一条：完整正文（先读本机副本），工具调用可折叠、报错的工具红色显示；底部可继续对话，对端会话右下角有「继承到本机」 |
 
 ## 继续一条对话意味着什么
 
@@ -131,12 +158,14 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/in
   identity.json              本机 deviceId 与设备名
   peers.json                 对方设备名单
   index/<deviceId>.json      对方的会话索引
-  remote/<deviceId>/<id>.json  对方会话的本地副本（只读，不会出现在普通会话列表里）
+  remote/<deviceId>/<id>.json  对方会话的本地副本（只读，自动同步而来，不注册进本机会话列表）
   outbox.json                中继断开时暂存待发信封
 ```
 
 写入一律「临时文件 + 原子重命名」。对端会话副本**不注册进会话存储**，所以既不会混进
-你的会话列表，也不会被误 resume。
+你的会话列表，也不会被误 resume；只有你主动点「继承到本机」时，才会通过
+`sessionPersistence.create/append/flush` 写出一条新的**本机会话**，那条和普通会话一样
+出现在列表里、可以 resume。
 
 ---
 
@@ -164,7 +193,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/in
 | 部分 | 状态 |
 |---|---|
 | 中继 `relay/relay.cjs` | ✅ 端到端验证，32 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱与重连排空、半开连接离场、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
-| Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，62 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、按需抓取、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
+| Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，76 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、**设备一出现就自动全文同步**、**缓存优先读取**、**继承成本机会话且事件逐条重排**、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
 | 浏览器半渲染 | ✅ 80 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
 | `deep-connect/relay/cloudflare` | ⚠️ **未运行过**（本机 `workers.dev` 被污染且没有账号）。按官方 API 写，首次 `wrangler deploy` 才是真测试 |
 | `deep-connect/relay/deno` | ⚠️ **未运行过**。同上，协议与 `relay.cjs` 一致 |
@@ -173,7 +202,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v0.1.1/in
 
 ```bash
 node tools/relay-smoke.mjs        # 中继（32 项）
-node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（62 项）
+node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（76 项）
 node tools/client-check.mjs       # 浏览器半（80 项）
 node ../tools/browser/check-connect.mjs   # 真机 GUI：面板真的渲染出来（需 GUI 在 19387 运行）
 ```
@@ -247,7 +276,7 @@ bag 之前的 children 全部保留、child 位上的对象被丢弃、渲染失
 
 | 路径 | 作用 |
 |---|---|
-| `plugin/` | 插件本体：`index.js`（Host 半）、`client.js`（浏览器半）、`host/`（加密、存储、会话读取、中继客户端）、`cordis.patch.yml`、`package.json` |
+| `plugin/` | 插件本体：`index.js`（Host 半）、`client.js`（浏览器半）、`host/`（加密、存储、会话读取、中继客户端、继承写入 `inherit.js`）、`cordis.patch.yml`、`package.json` |
 | `relay/` | 中继端：`relay.cjs`（零依赖单文件，已验证）、`install.sh`、`DEPLOY.md`、`cloudflare/`、`deno/`（云端版，未运行验证） |
 | `install.sh` / `uninstall.sh` | 装/卸。支持本地 checkout 与 `curl \| bash` 远程安装，幂等并备份 |
 | `tools/` | 三套测试：`relay-smoke.mjs`、`deep-connect-e2e.mjs`、`client-check.mjs` |

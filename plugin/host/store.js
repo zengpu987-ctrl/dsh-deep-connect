@@ -22,7 +22,7 @@
  *
  * @module dsh-deep-connect/store
  */
-import { mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -237,6 +237,16 @@ export class DeepConnectStore {
   /** Read a stored conversation copy, or `undefined` when never fetched. */
   async getHistory(deviceId, sessionId) {
     return readJson(this.#historyPath(deviceId, sessionId));
+  }
+
+  /** Whether a copy exists, without reading the (possibly large) body. */
+  async hasHistory(deviceId, sessionId) {
+    try {
+      await access(this.#historyPath(deviceId, sessionId));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Forget every copy of one peer's conversations (used when a peer is removed). */

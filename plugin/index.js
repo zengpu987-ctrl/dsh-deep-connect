@@ -28,6 +28,7 @@
 import { RelayClient } from './host/relay.js';
 import { DeepConnectStore } from './host/store.js';
 import { SessionAdapter } from './host/sessions.js';
+import { createInheritedSession } from './host/inherit.js';
 import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_VERSION } from './host/crypto.js';
 
 export const name = 'deep-connect';
@@ -51,8 +52,12 @@ const KIND = {
   index: 'index',
   history: 'history',
   prompt: 'prompt',
+  export: 'export',
   ping: 'ping',
 };
+
+/** Largest raw event export one envelope may carry, comfortably below the relay's 16 MB frame cap. */
+const MAX_EXPORT_BYTES = 12 * 1024 * 1024;
 
 /**
  * @param {object} ctx - the Host plugin context.
@@ -69,6 +74,12 @@ export function apply(ctx, config) {
     autoIndex: config?.autoIndex !== false,
     indexIntervalMs: Math.max(5000, Number(config?.indexIntervalMs ?? 15000)),
     historyLimitEvents: Math.max(200, Number(config?.historyLimitEvents ?? 20_000)),
+    // Auto-pull every peer conversation body the moment a peer appears, instead
+    // of waiting for a human to click each row. On by default: the point of the
+    // plugin is that the other machine's work is already here.
+    autoSyncHistory: config?.autoSyncHistory !== false,
+    maxSyncSessions: Math.max(1, Number(config?.maxSyncSessions ?? 300)),
+    syncDelayMs: Math.max(0, Number(config?.syncDelayMs ?? 40)),
     // Not a user-facing setting: it exists so a test can shorten the liveness
     // probe without shipping a different code path.
     heartbeatMs: Math.max(1000, Number(config?.heartbeatMs ?? 20_000)),
@@ -96,6 +107,14 @@ export function apply(ctx, config) {
     localIndex: [],
     lastIndexAt: 0,
     lastIndexError: '',
+    /** Pending peer-conversation pulls; serialized so a burst cannot swamp the relay. */
+    syncQueue: [],
+    /** `"deviceId\u0000sessionId"` for pulls already queued or running. */
+    syncPending: new Set(),
+    syncRunning: false,
+    /** Per-session sync bookkeeping for the panel: key -> {at, ok, error}. */
+    syncState: new Map(),
+    syncedAt: 0,
     started: false,
   };
 
@@ -250,6 +269,104 @@ export function apply(ctx, config) {
     };
     await store.setRemoteIndex(from, document);
     log('debug', `收到 ${document.deviceName} 的索引：${document.entries.length} 条`);
+    queuePeerSync(from, document.entries);
+  }
+
+  /* --------------------------- full-history sync --------------------------- */
+
+  /** One queue key per (device, session) pair. */
+  function syncKey(deviceId, sessionId) {
+    return `${deviceId}\u0000${sessionId}`;
+  }
+
+  /**
+   * Queue every conversation in a peer index that we do not already hold.
+   *
+   * This is what makes "两端出现彼此设备以后立即同步所有任务对话" true: the index
+   * says what exists, and this pulls every body — not just the ones a human
+   * happened to click. A cached copy whose (eventCount, updatedAt) still match
+   * the index row is skipped, so a healthy corpus costs no traffic.
+   */
+  function queuePeerSync(deviceId, entries) {
+    if (!settings.autoSyncHistory) return;
+    let queued = 0;
+    for (const entry of entries.slice(0, settings.maxSyncSessions)) {
+      const sessionId = String(entry?.sessionId ?? '');
+      if (sessionId === '') continue;
+      const key = syncKey(deviceId, sessionId);
+      if (state.syncPending.has(key)) continue;
+      state.syncPending.add(key);
+      state.syncQueue.push({
+        key,
+        deviceId,
+        sessionId,
+        eventCount: Number(entry.eventCount ?? 0),
+        updatedAt: Number(entry.updatedAt ?? 0),
+      });
+      queued += 1;
+    }
+    if (queued > 0) {
+      log('debug', `排队拉取 ${deviceId.slice(0, 12)} 的 ${queued} 条会话正文`);
+      void runSyncQueue();
+    }
+  }
+
+  /** Drain the sync queue one conversation at a time. */
+  async function runSyncQueue() {
+    if (state.syncRunning) return;
+    state.syncRunning = true;
+    try {
+      while (state.syncQueue.length > 0) {
+        if (!state.started || state.relay?.connected !== true) break;
+        const job = state.syncQueue.shift();
+        try {
+          const cached = await store.getHistory(job.deviceId, job.sessionId);
+          const fresh =
+            cached !== undefined &&
+            Number(cached.eventCount ?? 0) === job.eventCount &&
+            Number(cached.updatedAt ?? 0) === job.updatedAt;
+          if (fresh) {
+            state.syncState.set(job.key, { at: Date.now(), ok: true, cached: true });
+            continue;
+          }
+          const reply = await askPeer(job.deviceId, { need: KIND.history, sessionId: job.sessionId }, 30_000);
+          if (reply === undefined || reply.error !== undefined) {
+            state.syncState.set(job.key, { at: Date.now(), ok: false, error: reply?.error ?? 'no-answer' });
+            continue;
+          }
+          await acceptIndexHistory(job.deviceId, reply);
+          state.syncState.set(job.key, { at: Date.now(), ok: true });
+        } catch (error) {
+          state.syncState.set(job.key, {
+            at: Date.now(),
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          state.syncPending.delete(job.key);
+        }
+        if (settings.syncDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, settings.syncDelayMs));
+      }
+    } finally {
+      state.syncRunning = false;
+      state.syncedAt = Date.now();
+    }
+  }
+
+  /**
+   * Pull everything missing from the indices already on disk.
+   *
+   * The roster event only fires on a change, so a restart (or a fresh panel
+   * mount) needs this pass to re-queue the conversations a previous run had not
+   * finished copying.
+   */
+  async function syncFromCachedIndices() {
+    const identity = store.getIdentity();
+    for (const peer of store.getPeers()) {
+      if (peer.deviceId === identity.deviceId || peer.online !== true) continue;
+      const document = await store.getRemoteIndex(peer.deviceId).catch(() => undefined);
+      if (document !== undefined) queuePeerSync(peer.deviceId, document.entries ?? []);
+    }
   }
 
   /** Answer a peer's request for one conversation body. */
@@ -270,6 +387,53 @@ export function apply(ctx, config) {
       truncated: exported.truncated,
       tasks: exported.tasks,
       transcript: exported.transcript,
+      updatedAt: exported.updatedAt,
+      fetchedAt: Date.now(),
+    });
+  }
+
+  /**
+   * Answer a peer's request for one session's RAW event log.
+   *
+   * This is the payload "继承" needs: a transcript is for reading, but a local
+   * copy that can be resumed has to carry the events themselves.
+   */
+  async function serveExport(from, payload, requestId) {
+    const sessionId = String(payload?.sessionId ?? '');
+    if (sessionId === '') return;
+    const read = await sessions.readEvents(sessionId);
+    if (read === undefined) {
+      await state.relay?.reply(from, requestId, { kind: KIND.export, sessionId, error: 'not-found' });
+      return;
+    }
+    const events = read.events.map((event) => {
+      /** @type {Record<string, unknown>} */
+      const row = { type: event.type, seq: event.seq, time: event.time, data: event.data };
+      if (event.ignorable === true) row.ignorable = true;
+      if (event.surfaceOp !== undefined) row.surfaceOp = event.surfaceOp;
+      if (Array.isArray(event.sourceEventSeqs)) row.sourceEventSeqs = event.sourceEventSeqs;
+      return row;
+    });
+    const bytes = Buffer.byteLength(JSON.stringify(events), 'utf8');
+    if (bytes > MAX_EXPORT_BYTES) {
+      await state.relay?.reply(from, requestId, {
+        kind: KIND.export,
+        sessionId,
+        error: 'too-large',
+        bytes,
+        limit: MAX_EXPORT_BYTES,
+      });
+      return;
+    }
+    await state.relay?.reply(from, requestId, {
+      kind: KIND.export,
+      sessionId,
+      deviceId: store.getIdentity().deviceId,
+      title: read.title,
+      eventCount: events.length,
+      inheritedEventCount: read.inheritedEventCount,
+      header: read.header,
+      events,
       fetchedAt: Date.now(),
     });
   }
@@ -333,6 +497,7 @@ export function apply(ctx, config) {
     const requestId = typeof payload?.requestId === 'string' ? payload.requestId : undefined;
     if (requestId === undefined) return;
     if (payload?.need === KIND.history) await serveHistory(from, payload, requestId);
+    else if (payload?.need === KIND.export) await serveExport(from, payload, requestId);
     else if (payload?.need === KIND.prompt) await servePrompt(from, payload, requestId);
   }
 
@@ -349,6 +514,9 @@ export function apply(ctx, config) {
       truncated: payload.truncated === true,
       tasks: payload.tasks,
       transcript: Array.isArray(payload.transcript) ? payload.transcript : [],
+      // The peer's own activity time, so the sync queue can tell "unchanged" from
+      // "grew" without moving the body again.
+      updatedAt: Number(payload.updatedAt ?? 0),
       fetchedAt: Number(payload.fetchedAt ?? Date.now()),
     });
     log('debug', `已缓存 ${from.slice(0, 12)} 的会话 ${sessionId}`);
@@ -366,11 +534,15 @@ export function apply(ctx, config) {
       const document = await store.getRemoteIndex(peer.deviceId);
       if (document === undefined) continue;
       for (const entry of document.entries ?? []) {
+        const sessionId = String(entry.sessionId ?? '');
         rows.push({
           ...entry,
           ownerId: peer.deviceId,
           ownerName: document.deviceName ?? peer.name ?? peer.deviceId.slice(0, 8),
           isRemote: true,
+          // Whether the full body is already on this disk: the panel shows it,
+          // and it is the honest answer to "已同步了吗".
+          hasCopy: sessionId === '' ? false : await store.hasHistory(peer.deviceId, sessionId),
         });
       }
     }
@@ -414,6 +586,11 @@ export function apply(ctx, config) {
         remote: rows.filter((row) => row.isRemote === true).length,
         peers: peers.length,
         onlinePeers: peers.filter((peer) => peer.online).length,
+        // Auto-sync progress, so the panel can state it instead of implying it.
+        remoteWithCopy: rows.filter((row) => row.isRemote === true && row.hasCopy === true).length,
+        syncQueued: state.syncQueue.length,
+        syncRunning: state.syncRunning === true,
+        syncedAt: state.syncedAt,
       },
       sessionsAvailable: sessions.available,
       degraded: sessions.degraded,
@@ -489,15 +666,29 @@ export function apply(ctx, config) {
         };
       }
       const peer = store.getPeers().find((entry) => entry.deviceId === deviceId);
-      if (peer !== undefined && peer.online === true && state.relay?.connected === true) {
-        const reply = await askPeer(deviceId, { need: KIND.history, sessionId });
-        if (reply !== undefined && reply.error === undefined) {
-          await acceptIndexHistory(deviceId, reply);
+      const online = peer !== undefined && peer.online === true && state.relay?.connected === true;
+      let cached = await store.getHistory(deviceId, sessionId);
+      if (online) {
+        // Cache first: the background sync already pulled every body, so opening
+        // one must not depend on a live round trip. A copy is only re-fetched
+        // when its (eventCount, updatedAt) no longer match the peer's index row.
+        const document = await store.getRemoteIndex(deviceId);
+        const row = (document?.entries ?? []).find((entry) => String(entry.sessionId) === sessionId);
+        const fresh =
+          cached !== undefined &&
+          row !== undefined &&
+          Number(cached.eventCount ?? 0) === Number(row.eventCount ?? 0) &&
+          Number(cached.updatedAt ?? 0) === Number(row.updatedAt ?? 0);
+        if (!fresh) {
+          const reply = await askPeer(deviceId, { need: KIND.history, sessionId });
+          if (reply !== undefined && reply.error === undefined) {
+            await acceptIndexHistory(deviceId, reply);
+            cached = await store.getHistory(deviceId, sessionId);
+          }
         }
       }
-      const cached = await store.getHistory(deviceId, sessionId);
       if (cached === undefined) {
-        throw notFound(peer !== undefined && peer.online === true ? '对端没有应答，请稍后重试' : '对端设备离线，且本地没有这份对话的副本');
+        throw notFound(online ? '对端没有应答，请稍后重试' : '对端设备离线，且本地没有这份对话的副本');
       }
       return {
         sessionId,
@@ -527,6 +718,41 @@ export function apply(ctx, config) {
       if (reply === undefined) throw notFound('对端没有在超时时间内确认，请稍后重试');
       if (reply.accepted !== true) throw badRequest(`对端拒绝执行：${String(reply.reason ?? 'unknown')}`);
       return { accepted: true, deliveredTo: deviceId };
+    }
+
+    if (action === 'inherit') {
+      const deviceId = String(body.deviceId ?? '');
+      const sessionId = String(body.sessionId ?? '');
+      if (deviceId === '' || sessionId === '') throw badRequest('deviceId and sessionId are required');
+      const local = store.getIdentity().deviceId;
+      if (deviceId === local) throw badRequest('这条会话已经在本机，不需要继承');
+      const peer = store.getPeers().find((entry) => entry.deviceId === deviceId);
+      if (peer === undefined || peer.online !== true || state.relay?.connected !== true) {
+        throw notFound('对端设备当前不在线，无法继承这条会话；等它上线后再试');
+      }
+      const persistence = ctx.get?.('sessionPersistence');
+      if (persistence === undefined) {
+        throw badRequest('这个部署没有挂载可写的会话存储（sessionPersistence），无法在本机落地继承的会话');
+      }
+      const reply = await askPeer(deviceId, { need: KIND.export, sessionId }, 90_000);
+      if (reply === undefined) throw notFound('对端没有在超时时间内返回会话事件，请稍后重试');
+      if (reply.error === 'too-large') {
+        throw badRequest(`这条会话的原始事件有 ${Number(reply.bytes ?? 0)} 字节，超过单次传输上限 ${MAX_EXPORT_BYTES} 字节`);
+      }
+      if (reply.error !== undefined) throw notFound(`对端无法导出这条会话：${String(reply.error)}`);
+      const created = await createInheritedSession({ persistence, ctx, payload: reply, log });
+      // The new session is local, so the panel's merged view must be rebuilt for
+      // it to show up without waiting for the next index tick.
+      state.lastIndexAt = 0;
+      setTimeout(() => void publishIndex({ force: true }), 300).unref?.();
+      return {
+        sessionId: created.sessionId,
+        sourceSessionId: sessionId,
+        sourceDeviceId: deviceId,
+        title: typeof reply.title === 'string' ? reply.title : '',
+        eventCount: created.eventCount,
+        cwd: created.cwd,
+      };
     }
 
     if (action === 'forget-peer') {
@@ -637,6 +863,14 @@ export function apply(ctx, config) {
                 lastSeen: Number(device.lastSeen ?? Date.now()),
               })),
           );
+          // A peer that just came online may already have a cached index from
+          // before it went away; pull whatever is missing without waiting for
+          // its next broadcast.
+          for (const device of devices) {
+            if (device.id === identity.deviceId || device.online !== true) continue;
+            const document = await store.getRemoteIndex(String(device.id)).catch(() => undefined);
+            if (document !== undefined) queuePeerSync(String(device.id), document.entries ?? []);
+          }
         },
         onState: () => {
           /* The panel polls `list`, so connection state needs no separate push. */
@@ -650,6 +884,13 @@ export function apply(ctx, config) {
       if (settings.autoIndex && sessions.available) {
         await publishIndex({ force: true });
       }
+      // Give the roster a moment to arrive, then drain whatever the previous
+      // run left unfinished.
+      setTimeout(() => {
+        void syncFromCachedIndices().catch((error) =>
+          log('warn', `补同步失败：${error instanceof Error ? error.message : String(error)}`),
+        );
+      }, 1_500).unref?.();
       ctx.interval(() => {
         void publishIndex();
       }, settings.indexIntervalMs);
@@ -664,5 +905,5 @@ export function apply(ctx, config) {
   /* Exposed for the offline test harness: it drives a real plugin instance with
    * a stub context and asserts on these, which is the only way to test this
    * half without booting the whole Harness. */
-  return { command, publishIndex, store, sessions, state, buildListView };
+  return { command, publishIndex, store, sessions, state, buildListView, queuePeerSync, runSyncQueue, serveExport };
 }
