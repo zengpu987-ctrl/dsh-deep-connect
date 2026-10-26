@@ -35,7 +35,7 @@ import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_
 export const name = 'deep-connect';
 
 /** The version shown in the panel and compared against GitHub releases. */
-export const PLUGIN_VERSION = '3.0.0';
+export const PLUGIN_VERSION = '3.0.1';
 /** GitHub repository the updater asks about. */
 const UPDATE_REPO = 'zengpu987-ctrl/dsh-deep-connect';
 /** Check at most this often unless the user asks explicitly. */
@@ -66,6 +66,30 @@ const KIND = {
 
 /** Largest raw event export one envelope may carry, comfortably below the relay's 16 MB frame cap. */
 const MAX_EXPORT_BYTES = 12 * 1024 * 1024;
+
+/** Numeric segment comparison; `3.0.1` > `3.0.0`, `v` prefixes are ignored. */
+export function compareVersion(a, b) {
+  const parse = (value) => String(value).replace(/^v/i, '').split(/[-+.]/).map((part) => Number.parseInt(part, 10)).filter((part) => Number.isFinite(part));
+  const left = parse(a);
+  const right = parse(b);
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (left[index] ?? 0) - (right[index] ?? 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+/** The highest semver tag in a GitHub tags payload, or ''. */
+export function pickLatestVersion(tags) {
+  const versions = Array.isArray(tags)
+    ? tags
+        .map((tag) => String(tag?.name ?? '').replace(/^v/i, ''))
+        .filter((name) => /^\d+\.\d+\.\d+$/.test(name))
+    : [];
+  versions.sort((left, right) => compareVersion(right, left));
+  return versions[0] ?? '';
+}
 
 /**
  * @param {object} ctx - the Host plugin context.
@@ -683,18 +707,7 @@ export function apply(ctx, config) {
 
   /* ------------------------------ self-update ------------------------------ */
 
-  /** Numeric segment comparison; `3.0.1` > `3.0.0`, `v` prefixes are ignored. */
-  function compareVersion(a, b) {
-    const parse = (value) => String(value).replace(/^v/i, '').split(/[-+.]/).map((part) => Number.parseInt(part, 10)).filter((part) => Number.isFinite(part));
-    const left = parse(a);
-    const right = parse(b);
-    const length = Math.max(left.length, right.length);
-    for (let index = 0; index < length; index += 1) {
-      const diff = (left[index] ?? 0) - (right[index] ?? 0);
-      if (diff !== 0) return diff > 0 ? 1 : -1;
-    }
-    return 0;
-  }
+  /* compareVersion lives at module scope so the update logic is testable. */
 
   /** Ask GitHub for the latest release. Never throws: the panel answers "unknown". */
   async function checkUpdate(force) {
@@ -711,15 +724,17 @@ export function apply(ctx, config) {
       error: '',
     };
     try {
-      const response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      // Tags, not `releases/latest`: a release page is an optional nicety, but
+      // every shipped version gets a tag, so tags are the authoritative list.
+      const response = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/tags?per_page=50`, {
         headers: { accept: 'application/vnd.github+json', 'user-agent': `dsh-deep-connect/${PLUGIN_VERSION}` },
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) throw new Error(`GitHub 返回 HTTP ${response.status}`);
       const body = await response.json();
-      const latest = String(body.tag_name ?? '').replace(/^v/, '');
+      const latest = pickLatestVersion(body);
       info.latest = latest;
-      info.url = typeof body.html_url === 'string' ? body.html_url : '';
+      info.url = latest === '' ? '' : `https://github.com/${UPDATE_REPO}/releases/tag/v${latest}`;
       info.outdated = latest !== '' && compareVersion(latest, PLUGIN_VERSION) > 0;
       info.command = latest === ''
         ? ''

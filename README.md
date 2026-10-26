@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.0/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.1/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -69,7 +69,7 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.0/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.1/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -95,7 +95,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v3.0.0/in
 
 ---
 
-## v3.0.0 Pro：一键中继站、旧版失效、自动检查更新
+## v3.0.0 Pro（发布补丁 v3.0.1）：一键中继站、旧版失效、自动检查更新
 
 - **中继站取代旧互联方式。** 不再需要在两台机器上填同一个中继地址、也不再靠账号或口令
   推出共享密钥：一台设备生成中继站，另一台粘贴链接加入。邀请令牌就是密钥输入。
