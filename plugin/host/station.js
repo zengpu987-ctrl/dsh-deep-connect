@@ -27,6 +27,7 @@ import { createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MIN_VERSION } from './version.js';
 
 /** Protocol this station speaks. Old clients are refused below this. */
 export const STATION_PROTOCOL = 3;
@@ -298,6 +299,7 @@ export class RelayStation {
       '--state', statePath,
       '--token', token,
       '--require-proto', String(STATION_PROTOCOL),
+      '--require-version', MIN_VERSION,
     ], { detached: true, stdio: 'ignore' });
     this.relayPid = this.relay.pid ?? 0;
     this.relay.unref();

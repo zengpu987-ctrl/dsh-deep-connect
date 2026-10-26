@@ -31,6 +31,7 @@ import { SessionAdapter } from './host/sessions.js';
 import { createInheritedSession } from './host/inherit.js';
 import { RelayStation, adoptStation, openTunnel, parseStationLink, stationLink, findCloudflared, lanAddress } from './host/station.js';
 import { MobileGateway } from './host/mobile.js';
+import { PLUGIN_VERSION, MIN_VERSION, compareVersion } from './host/version.js';
 import { httpsGetJson, httpsDownload, curlGet } from './host/net.js';
 import { spawn } from 'node:child_process';
 import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
@@ -39,9 +40,8 @@ import { fileURLToPath } from 'node:url';
 import { channelFor, deriveKey, deriveKeyPbkdf2, fingerprint, frameId, PROTOCOL_VERSION } from './host/crypto.js';
 
 export const name = 'deep-connect';
+export { PLUGIN_VERSION, MIN_VERSION, compareVersion };
 
-/** The version shown in the panel and compared against GitHub releases. */
-export const PLUGIN_VERSION = '4.0.2';
 /** GitHub repository the updater asks about. */
 const UPDATE_REPO = 'zengpu987-ctrl/dsh-deep-connect';
 /** Check at most this often unless the user asks explicitly. */
@@ -73,19 +73,6 @@ const KIND = {
 
 /** Largest raw event export one envelope may carry, comfortably below the relay's 16 MB frame cap. */
 const MAX_EXPORT_BYTES = 12 * 1024 * 1024;
-
-/** Numeric segment comparison; `3.0.1` > `3.0.0`, `v` prefixes are ignored. */
-export function compareVersion(a, b) {
-  const parse = (value) => String(value).replace(/^v/i, '').split(/[-+.]/).map((part) => Number.parseInt(part, 10)).filter((part) => Number.isFinite(part));
-  const left = parse(a);
-  const right = parse(b);
-  const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index += 1) {
-    const diff = (left[index] ?? 0) - (right[index] ?? 0);
-    if (diff !== 0) return diff > 0 ? 1 : -1;
-  }
-  return 0;
-}
 
 /** The highest semver tag in a GitHub tags payload, or ''. */
 export function pickLatestVersion(tags) {
@@ -1082,6 +1069,7 @@ export function apply(ctx, config) {
       peers,
       sessions: rows,
       version: PLUGIN_VERSION,
+      minVersion: MIN_VERSION,
       protocol: PROTOCOL_VERSION,
       edition: 'Pro',
       station: stationView(),
@@ -1119,6 +1107,11 @@ export function apply(ctx, config) {
    */
   async function command(body) {
     const action = String(body?.action ?? '');
+    // A build older than the floor may only read the list (so the panel can
+    // render the sealed screen) and update itself.
+    if (compareVersion(PLUGIN_VERSION, MIN_VERSION) < 0 && !['list', 'update-check', 'update-install'].includes(action)) {
+      throw badRequest(`此版本（v${PLUGIN_VERSION}）已封停，请升级到 v${MIN_VERSION} 或更高版本`);
+    }
     if (action === 'list') return buildListView();
 
     if (action === 'configure') {

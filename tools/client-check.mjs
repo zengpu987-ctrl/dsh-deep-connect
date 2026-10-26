@@ -230,7 +230,7 @@ const OFFLINE_SESSION = {
   title: '离线机器的会话', updatedAt: Date.now() - 86400000, eventCount: 7,
   userPrompts: ['晚安'], tasks: { open: 0, done: 0, team: 0 }, live: false, isRemote: true,
 };
-const LIST_VALUE = { self: SELF, peers: [PEER, OFFLINE_PEER], sessions: [LOCAL_SESSION, REMOTE_SESSION, OFFLINE_SESSION], stats: { local: 1, remote: 2, peers: 2 } };
+const LIST_VALUE = { self: SELF, peers: [PEER, OFFLINE_PEER], sessions: [LOCAL_SESSION, REMOTE_SESSION, OFFLINE_SESSION], stats: { local: 1, remote: 2, peers: 2 }, version: '4.0.3', minVersion: '4.0.2' };
 const HISTORY_VALUE = {
   sessionId: REMOTE_SESSION.sessionId, deviceId: PEER.deviceId, title: REMOTE_SESSION.title,
   transcript: [
@@ -508,6 +508,14 @@ installButton?.props?.onClick({});
 await settle();
 check('the update button installs instead of copying a command', globalThis.fetch.calls.some((call) => call.action === 'update-install'), JSON.stringify(globalThis.fetch.calls.slice(-3)));
 check('settings offers phone access', settingsHtml.includes('手机管理') && settingsHtml.includes('开启手机管理'));
+
+/* ------------------------------------------- 7c. sealed below the 4.0.2 floor */
+const sealedList = { ...LIST_VALUE, version: '4.0.1', minVersion: '4.0.2' };
+const sealed = await renderPanel(makeFetch({ listValue: sealedList }));
+const sealedHtml = serialize(sealed.tree);
+check('a build below the floor shows the sealed screen', sealedHtml.includes('此版本已封停'), sealedHtml.slice(0, 160));
+check('the sealed screen hides the panel', !sealedHtml.includes('data-dc="rail"'));
+check('the sealed screen names the upgrade command', sealedHtml.includes('dsh-deep-connect@v4.0.2/install.sh'));
 
 /* ---------------------------------------------------------------- 8. errors */
 const down = await renderPanel(makeFetch({ networkFail: true }));

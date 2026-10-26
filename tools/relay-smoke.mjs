@@ -474,6 +474,22 @@ try {
   const newClient = await fetch(`${protoBase}/v1/devices?channel=${v2Channel}&proto=3`);
   check(newClient.status === 200, 'a v3 client is admitted');
   await protoRelay.stop();
+
+  section('a sealed relay refuses releases below the floor');
+  const sealedRelay = createRelay({ host: '127.0.0.1', port: 0, requireProto: 3, requireVersion: '4.0.2' });
+  const sealedPort = await sealedRelay.start();
+  const sealedBase = `http://127.0.0.1:${sealedPort}`;
+  const sealedChannel = 'e'.repeat(64);
+  const noVersion = await fetch(`${sealedBase}/v1/devices?channel=${sealedChannel}&proto=3`);
+  check(noVersion.status === 426, 'a client that reports no version is sealed out');
+  const lowVersion = await fetch(`${sealedBase}/v1/devices?channel=${sealedChannel}&proto=3&ver=4.0.1`);
+  check(lowVersion.status === 426, 'v4.0.1 is sealed out');
+  check((await lowVersion.json()).error === 'version-refused', 'the refusal says version-refused');
+  const atFloor = await fetch(`${sealedBase}/v1/devices?channel=${sealedChannel}&proto=3&ver=4.0.2`);
+  check(atFloor.status === 200, 'v4.0.2 (the floor) is admitted');
+  const aboveFloor = await fetch(`${sealedBase}/v1/devices?channel=${sealedChannel}&proto=3&ver=4.0.3`);
+  check(aboveFloor.status === 200, 'v4.0.3 is admitted');
+  await sealedRelay.stop();
 } finally {
   try {
     await relay.stop();

@@ -199,7 +199,20 @@ window.__ModuleLoader__.load({
 			return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 		}
 
-		/** Short byte size for the session meta line; empty when the Host sent none. */
+		/** Numeric semver comparison, mirrored from the Host so the gate is local. */
+function compareVersions(a, b) {
+	const parse = (value) => String(value).replace(/^v/i, '').split(/[-+.]/).map((part) => Number.parseInt(part, 10)).filter((part) => Number.isFinite(part));
+	const left = parse(a);
+	const right = parse(b);
+	const length = Math.max(left.length, right.length);
+	for (let index = 0; index < length; index += 1) {
+		const diff = (left[index] ?? 0) - (right[index] ?? 0);
+		if (diff !== 0) return diff > 0 ? 1 : -1;
+	}
+	return 0;
+}
+
+/** Short byte size for the session meta line; empty when the Host sent none. */
 		function formatBytes(bytes) {
 			const value = Number(bytes);
 			if (!Number.isFinite(value) || value <= 0) return '';
@@ -384,6 +397,10 @@ window.__ModuleLoader__.load({
 			roleTool: '工具',
 			roleSystem: '系统',
 			roleDeveloper: '开发者',
+			gateTitle: '此版本已封停',
+			gateBody: 'v{current} 低于最低可用版本 v{min}，面板与互联功能已停用。请升级到最新版后再启动。',
+			gateCommand: '升级命令',
+			gateCopy: '复制命令',
 			paneDialogue: '对话',
 			paneTrajectory: '轨迹',
 			paneEmptyDialogue: '这条对话还没有对话内容。',
@@ -552,6 +569,10 @@ window.__ModuleLoader__.load({
 			roleTool: 'Tool',
 			roleSystem: 'System',
 			roleDeveloper: 'Developer',
+			gateTitle: 'This version is sealed',
+			gateBody: 'v{current} is below the minimum v{min}; the panel and interconnect are disabled. Upgrade before starting again.',
+			gateCommand: 'Upgrade command',
+			gateCopy: 'Copy command',
 			paneDialogue: 'Dialogue',
 			paneTrajectory: 'Trajectory',
 			paneEmptyDialogue: 'No dialogue yet.',
@@ -757,6 +778,7 @@ window.__ModuleLoader__.load({
 					draft.sessions = Array.isArray(value.sessions) ? value.sessions.filter((row) => row !== null && typeof row === 'object') : [];
 					draft.stats = value.stats !== null && typeof value.stats === 'object' ? value.stats : null;
 					draft.version = typeof value.version === 'string' ? value.version : '';
+					draft.minVersion = typeof value.minVersion === 'string' ? value.minVersion : '4.0.2';
 					draft.station = value.station !== null && typeof value.station === 'object' ? value.station : null;
 					draft.mobile = value.mobile !== null && typeof value.mobile === 'object' ? value.mobile : null;
 					draft.update = value.update !== null && typeof value.update === 'object' ? value.update : null;
@@ -1614,7 +1636,29 @@ window.__ModuleLoader__.load({
 			// no relay configured AND nothing ever arrived. A configured but silent
 			// relay keeps the lists, which carry their own "nothing here yet" lines.
 			const unconfigured = state.status === 'ready' && String(self?.relayUrl ?? '') === '' && peers.length === 0 && sessions.length === 0;
+			// v4.0.2 floor: a build older than the minimum gets one sealed screen,
+			// not a panel. The Host enforces the same rule server-side.
+			const belowFloor = typeof state.version === 'string' && state.version !== ''
+				&& compareVersions(state.version, String(state.minVersion ?? '4.0.2')) < 0;
 
+			if (belowFloor) {
+				const upgrade = `curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v${String(state.minVersion ?? '4.0.2') || '4.0.2'}/install.sh | bash`;
+				return h(
+					'section',
+					{ className: 'dc_root', 'data-dc': 'panel' },
+					div(
+						'dc_scroll',
+						div(
+							'dc_blank',
+							h('h2', { className: 'dc_blankTitle' }, t('gateTitle')),
+							para('dc_blankBody', t('gateBody').replace('{current}', String(state.version)).replace('{min}', String(state.minVersion ?? '4.0.2'))),
+							span('dc_fieldLabel', t('gateCommand')),
+							h('input', { className: 'dc_input dc_mono', type: 'text', value: upgrade, readOnly: true }),
+							para('dc_note', upgrade),
+						),
+					),
+				);
+			}
 			const header = h(
 				'header',
 				{ className: 'dc_head', 'data-window-drag': true },

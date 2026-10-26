@@ -148,6 +148,29 @@ function createRelay(options = {}) {
   const requiredToken = options.token ?? '';
   /** Reject any client that does not speak at least this Deep Connect protocol. */
   const requireProto = Math.max(0, Number(options.requireProto ?? 0));
+  /** Reject clients older than this release (semver string), when set. */
+  const requireVersion = String(options.requireVersion ?? '').trim();
+
+  /** Numeric semver comparison; returns <0, 0, >0 exactly like a sort comparator. */
+  function compareVersion(a, b) {
+    const parse = (value) => String(value).replace(/^v/i, '').split(/[-+.]/).map((part) => Number.parseInt(part, 10)).filter((part) => Number.isFinite(part));
+    const left = parse(a);
+    const right = parse(b);
+    const length = Math.max(left.length, right.length);
+    for (let index = 0; index < length; index += 1) {
+      const diff = (left[index] ?? 0) - (right[index] ?? 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  }
+
+  /** Is this client old enough to be sealed out? */
+  function versionRefused(req, url) {
+    if (requireVersion === '') return false;
+    const reported = String(url.searchParams.get('ver') ?? req.headers['x-dsh-connect-version'] ?? '');
+    // A client that reports nothing predates this rule by definition.
+    return reported === '' || compareVersion(reported, requireVersion) < 0;
+  }
   const mailboxLimit = Math.max(1, Number(options.mailboxLimit ?? 512));
   const ttlMs = Math.max(1000, Number(options.ttlMs ?? 7 * 24 * 3600 * 1000));
 
@@ -420,6 +443,10 @@ function createRelay(options = {}) {
       sendJson(res, 426, { error: 'upgrade-required', minProto: requireProto });
       return undefined;
     }
+    if (versionRefused(req, url)) {
+      sendJson(res, 426, { error: 'version-refused', minVersion: requireVersion });
+      return undefined;
+    }
     return channel;
   }
 
@@ -527,6 +554,10 @@ function createRelay(options = {}) {
     }
     if (requireProto > 0 && Number(url.searchParams.get('proto') ?? req.headers['x-dsh-connect-proto'] ?? 0) < requireProto) {
       socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nX-DC-Min-Proto: ' + requireProto + '\r\n\r\n');
+      return;
+    }
+    if (versionRefused(req, url)) {
+      socket.end('HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nX-DC-Min-Version: ' + requireVersion + '\r\n\r\n');
       return;
     }
     if (!/^[0-9a-f]{32,128}$/.test(channel) || typeof key !== 'string') {
@@ -638,12 +669,13 @@ function parseArgs(argv) {
     else if (arg === '--state') options.statePath = path.resolve(next());
     else if (arg === '--token') options.token = next();
     else if (arg === '--require-proto') options.requireProto = Number(next());
+    else if (arg === '--require-version') options.requireVersion = next();
     else if (arg === '--mailbox') options.mailboxLimit = Number(next());
     else if (arg === '--ttl-days') options.ttlMs = Number(next()) * 24 * 3600 * 1000;
     else if (arg === '--help' || arg === '-h') {
       process.stdout.write(
         'dsh-connect-relay [--port 8790] [--host 0.0.0.0] [--state ./relay-state.json]\n' +
-          '                  [--token <shared-secret>] [--require-proto 3] [--mailbox 512] [--ttl-days 7]\n',
+          '                  [--token <shared-secret>] [--require-proto 3] [--require-version 4.0.2] [--mailbox 512] [--ttl-days 7]\n',
       );
       process.exit(0);
     }

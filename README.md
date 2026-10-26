@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.2/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.3/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -69,7 +69,7 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.2/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.3/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -92,6 +92,27 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.2/in
 
 想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
 在面板里改填那条地址即可，协议与中继站完全一样。
+
+---
+
+## v4.0.3：v4.0.2 以下版本「窗口封死」
+
+两条路一起封：
+
+- **面板封死。** 运行的插件版本若低于 `MIN_VERSION`（4.0.2），客户端只渲染一屏
+  「此版本已封停」＋升级命令，设备栏、会话、设置全部不出现；Host 端也只放行
+  `list` / `update-check` / `update-install`，其它动作一律 `badRequest`。
+- **中继站封死。** 中继新增 `--require-version <semver>`：中继站默认以
+  `--require-version 4.0.2` 启动，握手和 HTTP 信箱都会检查 `ver` 参数
+  （`x-dsh-connect-version` 头同样接受）。**没有上报版本**或低于下限的客户端
+  直接吃 `426 version-refused`，邮件箱路径也拒绝。
+
+客户端现在每次连接都会带 `ver=<PLUGIN_VERSION>`（WebSocket 查询参数与 HTTP 头各一份）。
+版本号收敛到 [`plugin/host/version.js`](plugin/host/version.js) 一处：`PLUGIN_VERSION` 与
+`MIN_VERSION` 同源，避免面板 / 中继 / 更新检查三处漂移。
+
+> 手工用 `relay/install.sh` 起的中继不强制版本（那是自建部署的自由）；只有面板生成的
+> 中继站会带上版本门槛。
 
 ---
 
@@ -210,7 +231,7 @@ v2 把「点开才拉」变成「一出现就同步」：
 > 本机没挂载 `sessionPersistence` 的部署会直接说明无法继承。
 
 发版检查：`node tools/station-smoke.mjs` 真起一个中继站（relay 子进程 + cloudflared 隧道）并验证令牌、`proto=3` 门禁与邀请链接往返；`node tools/deep-connect-e2e.mjs` 覆盖了自动全文同步、缓存优先读取、
-继承落地等路径（103 项），`relay-smoke`（35 项）与 `client-check`（95 项）不变。
+继承落地等路径（103 项），`relay-smoke`（40 项）与 `client-check`（98 项）不变。
 
 
 ---
@@ -279,19 +300,19 @@ v2 把「点开才拉」变成「一出现就同步」：
 
 | 部分 | 状态 |
 |---|---|
-| 中继 `relay/relay.cjs` | ✅ 端到端验证，35 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱与重连排空、半开连接离场、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
+| 中继 `relay/relay.cjs` | ✅ 端到端验证，40 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱与重连排空、半开连接离场、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
 | Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，103 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、**设备一出现就自动全文同步**、**缓存优先读取**、**继承成本机会话且事件逐条重排**、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
-| 浏览器半渲染 | ✅ 95 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
+| 浏览器半渲染 | ✅ 98 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
 | `deep-connect/relay/cloudflare` | ⚠️ **未运行过**（本机 `workers.dev` 被污染且没有账号）。按官方 API 写，首次 `wrangler deploy` 才是真测试 |
 | `deep-connect/relay/deno` | ⚠️ **未运行过**。同上，协议与 `relay.cjs` 一致 |
 
 跑测试：
 
 ```bash
-node tools/relay-smoke.mjs        # 中继（35 项）
+node tools/relay-smoke.mjs        # 中继（40 项）
 node tools/station-smoke.mjs      # 一键中继站：真起 relay + cloudflared + 接续（17 项）
 node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（103 项）
-node tools/client-check.mjs       # 浏览器半（95 项）
+node tools/client-check.mjs       # 浏览器半（98 项）
 node ../tools/browser/check-connect.mjs   # 真机 GUI：面板真的渲染出来（需 GUI 在 19387 运行）
 ```
 

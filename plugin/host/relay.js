@@ -20,6 +20,7 @@
  * @module dsh-deep-connect/relay
  */
 import { channelFor, open as openFrame, seal, frameId, PROTOCOL_VERSION } from './crypto.js';
+import { PLUGIN_VERSION } from './version.js';
 
 /** Reconnect backoff bounds, in milliseconds. */
 const BACKOFF_MIN_MS = 1000;
@@ -38,6 +39,7 @@ export function relayUrlWithChannel(baseUrl, channel, token) {
   else if (url.protocol === 'https:') url.protocol = 'wss:';
   url.searchParams.set('channel', channel);
   url.searchParams.set('proto', String(PROTOCOL_VERSION));
+  url.searchParams.set('ver', PLUGIN_VERSION);
   if (token !== '') url.searchParams.set('token', token);
   return url.toString();
 }
@@ -522,6 +524,7 @@ export class RelayClient {
         headers: {
           'content-type': 'application/json',
           'x-dsh-connect-channel': this.channel,
+          'x-dsh-connect-version': PLUGIN_VERSION,
           ...(this.token === '' ? {} : { 'x-dsh-connect-token': this.token }),
         },
         body: JSON.stringify({ deviceId: this.deviceId, name: this.deviceName, ...envelope }),
@@ -548,6 +551,7 @@ export class RelayClient {
           headers: {
             'content-type': 'application/json',
             'x-dsh-connect-channel': this.channel,
+            'x-dsh-connect-version': PLUGIN_VERSION,
             ...(this.token === '' ? {} : { 'x-dsh-connect-token': this.token }),
           },
           body: JSON.stringify({ deviceId: this.deviceId, name: this.deviceName, waitMs: 20_000 }),
