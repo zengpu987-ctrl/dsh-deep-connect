@@ -1,0 +1,44 @@
+name: release tarball
+
+# Every release carries one prebuilt package tarball under a VERSION-FREE asset
+# name. That name is the whole point: the plugin-market entry installs
+#   https://github.com/zengpu987-ctrl/dsh-deep-connect/releases/latest/download/dsh-deep-connect.tgz
+# so each release replaces the asset and the market link keeps resolving to the
+# newest build without anyone editing a listing. A version in the filename
+# would 404 the day the next release is cut — the failure mode contributing.md
+# in awesome-dsh-plugin warns about.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to (re)upload the tarball to
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Pack the plugin bundle
+        run: |
+          mkdir -p dist
+          cd plugin
+          npm pack --pack-destination ../dist
+          cd ..
+          mv dist/*.tgz dist/dsh-deep-connect.tgz
+          tar -tzf dist/dsh-deep-connect.tgz | head -20
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" dist/dsh-deep-connect.tgz --clobber

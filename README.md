@@ -65,6 +65,14 @@ macOS 自带 `python3`，因此没装 Node 的机器也能直接跑。
 `desktop` profile → 写依赖、bundle 列表和 Loader 配置行。
 **改任何文件前都会备份**，重复运行是幂等的。装完**完全退出并重开 Harness**。
 
+每个 Release 还附带一个预编译包 `dsh-deep-connect.tgz`（由 [`.github/workflows/release-tarball.yml`](.github/workflows/release-tarball.yml) 打包，文件名不带版本号）。插件市场用它做免构建安装：
+
+```sh
+dsh plugin --profile web add "https://github.com/zengpu987-ctrl/dsh-deep-connect/releases/latest/download/dsh-deep-connect.tgz"
+```
+
+新版本发 Release 时该资产会被同名覆盖，所以这条链接永远指向最新版，市场条目不需要跟着改。
+
 想连中继地址一起写进去（这样面板里不用再填）：
 
 ```bash
