@@ -82,6 +82,9 @@ function makeSession({ id, title, cwd, texts, tasks }) {
 function makeStubContext({ accountId, sessions, prompts, log }) {
   const routes = [];
   const listeners = [];
+  /** Every `create`/`selectModel` call the plugin made on this Host. */
+  const creates = [];
+  const models = [];
   /** Sessions the plugin itself wrote (inheritance lands here). */
   const written = [];
   const services = {
@@ -139,11 +142,52 @@ function makeStubContext({ accountId, sessions, prompts, log }) {
     deepseekAccount: {
       getProfile: async () => (accountId === undefined ? null : { status: 'ready', value: { id: accountId, name: '测试账号', contact: null } }),
     },
+    // The asking machine picks the target's workspace and the model strength, so
+    // these records prove what actually crossed the wire.
+    workspaceRegistry: {
+      list: () => [{ id: 'ws-alpha', path: '/Users/zp/work/alpha', title: 'alpha' }],
+    },
+    workingDirectory: { defaultDirectory: '/Users/zp/work/alpha' },
+    agentDefaultModel: { currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-flash' }) },
     sessionController: {
-      prompt: async (request) => {
+      // A Host Remote method is `(request, signal)`: the real controller starts
+      // with `signal.throwIfAborted()`, so a direct call that forgets the signal
+      // dies exactly like the production bug this guards against. A stub that
+      // ignores the second argument hides the whole class of failure.
+      prompt: async (request, signal) => {
+        if (signal === undefined || typeof signal.throwIfAborted !== 'function') {
+          throw new TypeError("Cannot read properties of undefined (reading 'throwIfAborted')");
+        }
+        signal.throwIfAborted();
         prompts.push(request);
       },
-      create: async () => ({ sessionId: `session-new-${prompts.length + 1}` }),
+      create: async (request) => {
+        creates.push(request ?? {});
+        return { sessionId: `session-new-${prompts.length + 1}` };
+      },
+      selectModel: async (request) => {
+        models.push(request);
+        return {
+          selected: {
+            provider: request.provider,
+            model: request.model,
+            ...(request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort }),
+          },
+        };
+      },
+      modelCatalog: async () => ({
+        default: { provider: 'deepseek-official', model: 'deepseek-flash' },
+        routableProviders: ['deepseek-official'],
+        groups: [{
+          id: 'deepseek-official',
+          name: 'DeepSeek',
+          models: [
+            { id: 'deepseek-flash', name: 'Flash' },
+            { id: 'deepseek-pro', name: 'Pro', reasoning: { efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' } },
+          ],
+        }],
+        failures: [],
+      }),
     },
   };
   const ctx = {
@@ -175,7 +219,7 @@ function makeStubContext({ accountId, sessions, prompts, log }) {
       return undefined;
     },
   };
-  return { ctx, routes, listeners, services, written };
+  return { ctx, routes, listeners, services, written, creates, models };
 }
 
 /* ------------------------------- run ------------------------------- */
@@ -251,6 +295,11 @@ try {
   check(Array.isArray(alpha.tasks.items) && alpha.tasks.items.length >= 3, 'the task CONTENT crossed the wire, not just counts');
   check(alpha.tasks.items.some((item) => item.text === '写测试' && item.status === 'open'), 'the open todo keeps its text and state');
   check(alpha.tasks.items.some((item) => item.kind === 'goal' && item.text === '让两台 DSH 互联'), 'the goal appears as a task item');
+
+  const peerView = listB.peers[0];
+  check(Array.isArray(peerView?.workspaces) && peerView.workspaces.some((workspace) => workspace.id === 'ws-alpha'), 'the peer advertises its Workspaces for the command picker');
+  check(peerView?.defaultWorkspacePath === '/Users/zp/work/alpha', 'the peer advertises its default directory');
+  check(peerView?.model?.model === 'deepseek-flash', 'the peer advertises the model strength it is currently on');
 
   const remoteSessionIds = listB.sessions.filter((s) => !s.isRemote).map((s) => s.sessionId);
   check(remoteSessionIds.includes('session-gamma'), 'B still sees its own session');
@@ -451,6 +500,9 @@ try {
   check(stored !== undefined && stored.events[0]?.seq === 0 && stored.events.at(-1)?.seq === stored.events.length - 1, 'sequence numbers are re-based to 0..n-1');
   check(stored !== undefined && stored.events.some((event) => event.type === 'todo/write'), 'todo events survived the copy');
   check(stored !== undefined && stored.header.isSeeded === false && typeof stored.header.version === 'number', 'the header is a valid ordinary session header');
+  check(inherited.ran === true, 'relay admits one prompt into the new local session (so the task runs HERE)');
+  check(promptsB.some((request) => request.sessionId === inherited.sessionId && String(request.content?.[0]?.text ?? '').includes('接力到本机')), 'the local machine starts the relayed task itself');
+  check(String(inherited.task ?? '').includes('再补一个部署脚本'), 'the relay directive carries the original task text');
 
   section('v3: station surface, invite links, version compare');
   check(listA.version === PLUGIN_VERSION && listA.protocol === 3 && listA.edition === 'Pro', `the panel reports v3 Pro (${listA.version}/${listA.protocol}/${listA.edition})`);
@@ -481,6 +533,27 @@ try {
   check(taskReply.accepted === true, 'the peer accepts a remote command');
   check(String(taskReply.sessionId).startsWith('session-new-'), 'the command lands in a NEW session on the peer');
   check(promptsA.some((request) => request.sessionId === taskReply.sessionId && request.content?.[0]?.text === '在 A 上跑一下统计'), 'the peer actually admits the prompt');
+
+  section('v4.0.5: interjection must be obeyed as a steer');
+  const steer = await apiB.command({ action: 'prompt', deviceId: listA.self.deviceId, sessionId: 'session-alpha', text: '停一下，换个口径', mode: 'steer' });
+  check(steer.accepted === true && steer.mode === 'steer', 'the peer confirms the message was admitted as a STEER');
+  check(promptsA.some((request) => request.sessionId === 'session-alpha' && request.mode === 'steer' && request.content?.[0]?.text === '停一下，换个口径'), 'the interjection reaches the owning machine with mode=steer');
+
+  section('v4.0.5: the command carries the target workspace and the local model strength');
+  const createsBefore = hostA.creates.length;
+  const scoped = await apiB.command({
+    action: 'task-run',
+    deviceId: listA.self.deviceId,
+    text: '把统计跑出来',
+    workspaceId: 'ws-alpha',
+    model: { provider: 'deepseek-official', model: 'deepseek-pro', reasoningEffort: 'high' },
+  });
+  check(scoped.accepted === true, 'the peer accepts a command with a workspace and a model');
+  const createArgs = hostA.creates[createsBefore] ?? {};
+  check(createArgs.workspaceId === 'ws-alpha', `the peer creates the session IN the requested workspace (${JSON.stringify(createArgs)})`);
+  check(hostA.models.some((entry) => entry.sessionId === scoped.sessionId && entry.model === 'deepseek-pro' && entry.reasoningEffort === 'high'), 'the peer adopts the model strength chosen on the asking machine');
+  check(scoped.workspaceId === 'ws-alpha' && scoped.model?.model === 'deepseek-pro', 'the answer reports the workspace and model actually applied');
+  check(promptsA.some((request) => request.sessionId === scoped.sessionId && request.content?.[0]?.text === '把统计跑出来'), 'the prompt lands in that new session');
 
   section('v3.0.2: memory sharing can be switched off');
   await apiA.command({ action: 'configure', shareMemory: false });

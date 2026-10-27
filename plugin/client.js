@@ -169,6 +169,14 @@ window.__ModuleLoader__.load({
 				selectedDevice: '',
 				/** The command being typed for another device. */
 				taskDraft: '',
+				/** The Workspace of the TARGET device this command should land in; '' = its default. */
+				taskWorkspaceId: '',
+				/** `provider\u0000model` chosen here for the target's run; '' = its default. */
+				taskModelKey: '',
+				/** Reasoning effort id for the chosen model; '' = the model's default. */
+				taskEffort: '',
+				/** This machine's routable models, for the model-strength picker. */
+				modelCatalog: null,
 				/** The reader's `{ deviceId, sessionId }`, or null. */
 				reader: null,
 				/** `dialogue` | `trajectory` in the reader. */
@@ -251,6 +259,26 @@ function compareVersions(a, b) {
 				if (peer !== null && typeof peer === 'object' && typeof peer.deviceId === 'string') map.set(peer.deviceId, peer);
 			}
 			return map;
+		}
+
+		/** Flatten the Host's model catalog into picker rows. */
+		function modelRows(catalog) {
+			const rows = [];
+			const groups = Array.isArray(catalog?.groups) ? catalog.groups : [];
+			for (const group of groups) {
+				for (const model of Array.isArray(group?.models) ? group.models : []) {
+					const id = String(model?.id ?? '');
+					const provider = String(group?.id ?? '');
+					if (id === '' || provider === '') continue;
+					rows.push({
+						key: `${provider}\u0000${id}`,
+						label: `${String(model?.name ?? id)} · ${String(group?.name ?? provider)}`,
+						efforts: Array.isArray(model?.reasoning?.efforts) ? model.reasoning.efforts : [],
+						defaultEffort: typeof model?.reasoning?.defaultEffort === 'string' ? model.reasoning.defaultEffort : '',
+					});
+				}
+			}
+			return rows;
 		}
 
 		/** Numbers out of a reply are untrusted: coerce, defaulting to 0. */
@@ -479,13 +507,24 @@ function compareVersions(a, b) {
 			taskTeam: '团队 {n}',
 			deviceCommand: '给这台设备发命令',
 			deviceCommandPlaceholder: '例如：跑一下昨天的数据统计，把结果放在桌面',
-			deviceCommandHint: '命令会在那台设备上新建一条会话，由它的 DSH 执行；本机只是看着。',
+			deviceCommandHint: '命令会在那台设备的指定工作区里新建一条会话执行；工作区和模型强度都由本机选。',
 			deviceCommandSend: '下发',
+			commandWorkspace: '对端工作区',
+			commandWorkspaceHint: '命令落在这台设备的这个工作区；「默认」用它的默认目录。',
+			commandWorkspaceDefault: '默认（对端默认目录）',
+			commandWorkspaceDefaultTag: '默认',
+			commandModel: '模型强度',
+			commandModelHint: '模型强度由本机决定：要求对端按这个模型执行；「默认」用对端自己的模型。',
+			commandModelDefault: '默认（对端自己的模型）',
+			commandEffort: '思考强度',
+			commandEffortDefault: '模型默认',
 			taskSent: '命令已下发，对方正在执行',
 			inheritRow: '继承到本机',
 			relayTask: '接力到本机',
 			taskContent: '任务内容',
-			taskRelayed: '已接力到本机会话 {id}',
+			taskRelayed: '已继承到本机会话 {id}',
+			taskRelayedRunning: '已接力到本机会话 {id}，正在本机执行',
+			taskRelayedRunFailed: '已接力到本机会话 {id}，但本机启动执行失败：{error}',
 			taskMore: '还有 {n} 项',
 			deviceSessions: '会话 {n}',
 			selectDevice: '选择左侧设备查看任务',
@@ -652,13 +691,24 @@ function compareVersions(a, b) {
 			taskTeam: '{n} team',
 			deviceCommand: 'Send a command to this device',
 			deviceCommandPlaceholder: 'e.g. run yesterday’s stats and drop the results on the Desktop',
-			deviceCommandHint: 'The command creates a new session on that machine and its DSH runs it; this machine only watches.',
+			deviceCommandHint: 'The command creates a session in the workspace you pick ON THAT DEVICE; both the workspace and the model strength are chosen here.',
 			deviceCommandSend: 'Send',
-			taskSent: 'Command delivered; the other machine is running it',
+			commandWorkspace: 'Target workspace',
+			commandWorkspaceHint: 'Where the command lands on that device; “default” is its own default directory.',
+			commandWorkspaceDefault: 'Default (target’s own directory)',
+			commandWorkspaceDefaultTag: 'default',
+			commandModel: 'Model strength',
+			commandModelHint: 'The model strength is decided here: that device is told to run with this model; “default” leaves it to the target.',
+			commandModelDefault: 'Default (target’s own model)',
+			commandEffort: 'Reasoning effort',
+			commandEffortDefault: 'Model default',
+			taskSent: 'Command delivered — the other machine is running it',
 			inheritRow: 'Inherit here',
-			relayTask: 'Hand off here',
+			relayTask: 'Relay here',
 			taskContent: 'Task content',
-			taskRelayed: 'Handed off to local session {id}',
+			taskRelayed: 'Inherited as local session {id}',
+			taskRelayedRunning: 'Relayed to local session {id} — running on this machine',
+			taskRelayedRunFailed: 'Relayed to local session {id}, but starting it here failed: {error}',
 			taskMore: '{n} more',
 			deviceSessions: '{n} sessions',
 			selectDevice: 'Pick a device on the left to see its tasks',
@@ -802,6 +852,9 @@ function compareVersions(a, b) {
 				listInFlight = request({ action: 'list' })
 					.then((value) => {
 						if (!disposed) publish(value);
+						// One catalog read per panel mount: the model-strength picker
+						// needs this machine's routable models, and the Host caches it.
+						if (!disposed && store.getSnapshot().modelCatalog === null) void loadModelCatalog();
 					})
 					.catch((error) => {
 						if (disposed || (error instanceof Error && error.name === 'AbortError')) return;
@@ -818,9 +871,48 @@ function compareVersions(a, b) {
 				return listInFlight;
 			}
 
+			/**
+			 * Read this machine's routable models once, for the "模型强度由本机决定"
+			 * picker. A deployment with no catalog simply offers no override.
+			 */
+			async function loadModelCatalog() {
+				try {
+					const value = await request({ action: 'model-catalog' });
+					if (disposed) return;
+					store.update((draft) => {
+						draft.modelCatalog = value !== null && typeof value === 'object' ? value : null;
+						// "模型强度由本机决定" starts from THIS machine's own current
+						// selection, not from whatever the target happens to use. The
+						// empty option still means "leave it to the target".
+						if (String(draft.taskModelKey ?? '') === '') {
+							const selection = value?.default;
+							const provider = String(selection?.provider ?? '');
+							const model = String(selection?.model ?? '');
+							if (provider !== '' && model !== '') draft.taskModelKey = `${provider}\u0000${model}`;
+						}
+						if (String(draft.taskEffort ?? '') === '' && typeof value?.default?.reasoningEffort === 'string') {
+							draft.taskEffort = value.default.reasoningEffort;
+						}
+					});
+				} catch {
+					// The picker then falls back to "use the target's default".
+				}
+			}
+
+			/** Split a `provider\u0000model` key back into a wire selection. */
+			function selectionFromKey(key, effort) {
+				const raw = String(key ?? '');
+				const at = raw.indexOf('\u0000');
+				if (at <= 0) return undefined;
+				const provider = raw.slice(0, at);
+				const model = raw.slice(at + 1);
+				if (provider === '' || model === '') return undefined;
+				const reasoningEffort = String(effort ?? '');
+				return { provider, model, ...(reasoningEffort === '' ? {} : { reasoningEffort }) };
+			}
+
 			/** Ask the Host for one conversation's full transcript. */
-			async function loadHistory(deviceId, sessionId, options = {}) {
-				if (disposed || typeof deviceId !== 'string' || deviceId === '' || typeof sessionId !== 'string' || sessionId === '') return;
+			async function loadHistory(deviceId, sessionId, options = {}) {				if (disposed || typeof deviceId !== 'string' || deviceId === '' || typeof sessionId !== 'string' || sessionId === '') return;
 				const silent = options.silent === true;
 				if (!silent) {
 					store.update((draft) => {
@@ -974,7 +1066,17 @@ function compareVersions(a, b) {
 						: (peerMap(peers).get(reader.deviceId)?.name ?? reader.deviceId);
 					store.update((draft) => {
 						draft.pending = false;
-						draft.sent = { text: mode === 'steer' ? t('sentSteer') : t('sentQueue').replace('{name}', owner), mode, at: Date.now() };
+						// The peer reports what it actually admitted: an interjection
+						// that landed in the running turn and one that became the
+						// next turn must never read the same.
+						const effective = value?.mode === 'steer' ? 'steer' : 'queue';
+						draft.sent = {
+							text: effective === 'steer'
+								? t('sentSteer')
+								: t('sentQueue').replace('{name}', owner),
+							mode: effective,
+							at: Date.now(),
+						};
 						if (typeof value.deliveredTo === 'string' && value.deliveredTo !== '') draft.sent.deliveredTo = value.deliveredTo;
 					});
 					await reloadHistory();
@@ -1005,7 +1107,9 @@ function compareVersions(a, b) {
 					draft.sent = null;
 				});
 				try {
-					const value = await request({ action: 'inherit', deviceId: reader.deviceId, sessionId: reader.sessionId });
+					// "继承" is the copy half: keep the transcript here for reading and
+					// manual continuation. Running the task here is "接力", below.
+					const value = await request({ action: 'inherit', deviceId: reader.deviceId, sessionId: reader.sessionId, run: false });
 					if (disposed) return false;
 					const id = typeof value.sessionId === 'string' ? value.sessionId : '';
 					store.update((draft) => {
@@ -1035,17 +1139,43 @@ function compareVersions(a, b) {
 				store.update((draft) => { draft.selectedDevice = typeof deviceId === 'string' ? deviceId : ''; });
 			}
 
-			/** Send a free-form command to another machine's DSH. */
+			/**
+			 * Send a work command to another machine's DSH.
+			 *
+			 * The Workspace and the model strength are the choices made HERE: the
+			 * target runs the command in the picked workspace of its own machine
+			 * and adopts the selected model, or the pickers' fallbacks.
+			 */
 			async function runTask(deviceId, text) {
 				const body = typeof text === 'string' ? text.trim() : '';
 				if (deviceId === '' || body === '') return false;
+				const snapshot = store.getSnapshot();
+				const workspaceId = String(snapshot.taskWorkspaceId ?? '');
+				const model = selectionFromKey(snapshot.taskModelKey, snapshot.taskEffort);
 				store.update((draft) => { draft.pending = true; draft.error = null; });
 				try {
-					const value = await request({ action: 'task-run', deviceId, text: body });
+					const value = await request({
+						action: 'task-run',
+						deviceId,
+						text: body,
+						...(workspaceId === '' ? {} : { workspaceId }),
+						...(model === undefined ? {} : { model }),
+					});
 					if (disposed) return false;
+					const peer = peerMap(store.getSnapshot().peers).get(deviceId);
+					const place = (peer?.workspaces ?? []).find((workspace) => workspace.id === value?.workspaceId);
+					const applied = value?.model !== null && typeof value?.model === 'object' ? value.model : model;
+					const detail = [
+						place?.title ?? place?.path ?? (workspaceId === '' ? t('commandWorkspaceDefault') : ''),
+						applied?.model ?? t('commandModelDefault'),
+					].filter((part) => typeof part === 'string' && part !== '').join(' · ');
 					store.update((draft) => {
 						draft.pending = false;
-						draft.sent = { text: t('taskSent'), mode: 'system', at: Date.now() };
+						draft.sent = {
+							text: detail === '' ? t('taskSent') : `${t('taskSent')} · ${detail}`,
+							mode: 'system',
+							at: Date.now(),
+						};
 					});
 					await load(true);
 					return typeof value?.sessionId === 'string';
@@ -1056,18 +1186,34 @@ function compareVersions(a, b) {
 				}
 			}
 
-			/** Inherit one remote session straight from its row. */
-			async function inheritRow(deviceId, sessionId) {
+			/**
+			 * Inherit one remote session straight from its row, and (for "接力") run
+			 * it on this machine.
+			 * @param options.run - false copies only; true admits one prompt into the
+			 *   new local session so this machine actually does the work.
+			 */
+			async function inheritRow(deviceId, sessionId, options = {}) {
 				if (deviceId === '' || sessionId === '') return false;
+				const run = options.run === true;
 				store.update((draft) => { draft.pending = true; draft.error = null; });
 				try {
-					const value = await request({ action: 'inherit', deviceId, sessionId });
+					const value = await request({ action: 'inherit', deviceId, sessionId, run });
 					if (disposed) return false;
 					const localId = String(value?.sessionId ?? '');
+					const runError = typeof value?.runError === 'string' ? value.runError : '';
 					store.update((draft) => {
 						draft.pending = false;
 						draft.selectedDevice = draft.self?.deviceId ?? '';
-						draft.sent = { text: t('taskRelayed').replace('{id}', shortOf(localId, 22)), mode: 'system', at: Date.now() };
+						draft.sent = run
+							? {
+								text: runError === ''
+									? t('taskRelayedRunning').replace('{id}', shortOf(localId, 22))
+									: t('taskRelayedRunFailed').replace('{id}', shortOf(localId, 22)).replace('{error}', runError),
+								mode: 'system',
+								at: Date.now(),
+							}
+							: { text: t('taskRelayed').replace('{id}', shortOf(localId, 22)), mode: 'system', at: Date.now() };
+						if (runError !== '') draft.error = runError;
 					});
 					await load(true);
 					return true;
@@ -1748,6 +1894,12 @@ function compareVersions(a, b) {
 					shareMemory: peer?.shareMemory !== false,
 					lastSeen: Number(peer?.lastSeen ?? 0),
 					sessionCount: sessions.filter((row) => row.ownerId === peer?.deviceId).length,
+					// The command card picks a Workspace of THAT machine and shows the
+					// model it is currently on, so the peer's own advertisement has to
+					// survive this projection — dropping it silently emptied the picker.
+					workspaces: Array.isArray(peer?.workspaces) ? peer.workspaces : [],
+					defaultWorkspacePath: typeof peer?.defaultWorkspacePath === 'string' ? peer.defaultWorkspacePath : '',
+					model: peer?.model !== null && typeof peer?.model === 'object' ? peer.model : undefined,
 				})),
 			];
 			// '' means the overview: every device's sessions in one list. Clicking a
@@ -1846,7 +1998,7 @@ function compareVersions(a, b) {
 								span('dc_taskHead',
 									span('dc_taskTitle', String(row.title ?? row.sessionId ?? ''), { title: String(row.title ?? '') }),
 									String(row.ownerId ?? '') !== String(self?.deviceId ?? '')
-										? button('dc_link', t('relayTask'), () => void actions.inheritRow(String(row.ownerId ?? ''), String(row.sessionId ?? '')), { disabled: state.pending === true })
+										? button('dc_link', t('relayTask'), () => void actions.inheritRow(String(row.ownerId ?? ''), String(row.sessionId ?? ''), { run: true }), { disabled: state.pending === true })
 										: null,
 								),
 								span('dc_taskItems',
@@ -1860,27 +2012,66 @@ function compareVersions(a, b) {
 							)),
 						),
 					selectedDevice?.isRemote === true
-						? div(
-							'dc_command',
-							span('dc_fieldLabel', t('deviceCommand')),
-							div(
-								'dc_commandRow',
-								h('input', {
-									className: 'dc_input', type: 'text', value: state.taskDraft ?? '',
-									placeholder: t('deviceCommandPlaceholder'),
-									'aria-label': t('deviceCommand'),
-									onChange: (event) => store.update((draft) => { draft.taskDraft = event.target.value; }),
-								}),
-								button('dc_primary', state.pending === true ? t('sending') : t('deviceCommandSend'), () => {
-									const text = String(store.getSnapshot().taskDraft ?? '').trim();
-									if (text === '') return;
-									void actions.runTask(selectedDevice.deviceId, text).then((ok) => {
-										if (ok) store.update((draft) => { draft.taskDraft = ''; });
-									});
-								}, { disabled: state.pending === true || String(state.taskDraft ?? '').trim() === '' }),
-							),
-							span('dc_fieldHint', t('deviceCommandHint')),
-						)
+						? (() => {
+							// The WORKSPACE and the MODEL STRENGTH are chosen here, on the
+							// machine a human is typing on: the target runs the command in
+							// the picked workspace of its own machine and adopts the
+							// selected model rather than quietly using its own.
+							const workspaces = Array.isArray(selectedDevice.workspaces) ? selectedDevice.workspaces : [];
+							const picker = modelRows(state.modelCatalog);
+							const chosen = picker.find((row) => row.key === state.taskModelKey);
+							const efforts = chosen === undefined ? [] : chosen.efforts;
+							return div(
+								'dc_command',
+								span('dc_fieldLabel', t('deviceCommand')),
+								div(
+									'dc_commandRow',
+									h('input', {
+										className: 'dc_input', type: 'text', value: state.taskDraft ?? '',
+										placeholder: t('deviceCommandPlaceholder'),
+										'aria-label': t('deviceCommand'),
+										onChange: (event) => store.update((draft) => { draft.taskDraft = event.target.value; }),
+									}),
+									button('dc_primary', state.pending === true ? t('sending') : t('deviceCommandSend'), () => {
+										const text = String(store.getSnapshot().taskDraft ?? '').trim();
+										if (text === '') return;
+										void actions.runTask(selectedDevice.deviceId, text).then((ok) => {
+											if (ok) store.update((draft) => { draft.taskDraft = ''; });
+										});
+									}, { disabled: state.pending === true || String(state.taskDraft ?? '').trim() === '' }),
+								),
+								div(
+									'dc_commandRow',
+									h('select', {
+										className: 'dc_input dc_select', value: state.taskWorkspaceId ?? '',
+										'aria-label': t('commandWorkspace'), title: t('commandWorkspaceHint'),
+										onChange: (event) => store.update((draft) => { draft.taskWorkspaceId = event.target.value; }),
+									},
+										h('option', { key: 'w:auto', value: '' }, t('commandWorkspaceDefault')),
+										...workspaces.map((workspace) => h('option', { key: `w:${String(workspace.id)}`, value: String(workspace.id) },
+											String(workspace.title || workspace.path) +
+											(String(workspace.path) === String(selectedDevice.defaultWorkspacePath) ? ` · ${t('commandWorkspaceDefaultTag')}` : ''))),
+									),
+									h('select', {
+										className: 'dc_input dc_select', value: state.taskModelKey ?? '',
+										'aria-label': t('commandModel'), title: t('commandModelHint'),
+										onChange: (event) => store.update((draft) => { draft.taskModelKey = event.target.value; draft.taskEffort = ''; }),
+									},
+										h('option', { key: 'm:auto', value: '' }, t('commandModelDefault')),
+										...picker.map((row) => h('option', { key: `m:${row.key}`, value: row.key }, row.label)),
+									),
+									efforts.length === 0 ? null : h('select', {
+										className: 'dc_input dc_select', value: state.taskEffort ?? '',
+										'aria-label': t('commandEffort'),
+										onChange: (event) => store.update((draft) => { draft.taskEffort = event.target.value; }),
+									},
+										h('option', { key: 'e:auto', value: '' }, t('commandEffortDefault')),
+										...efforts.map((effort) => h('option', { key: `e:${String(effort.id)}`, value: String(effort.id) }, String(effort.name ?? effort.id))),
+									),
+								),
+								span('dc_fieldHint', t('deviceCommandHint')),
+							);
+						})()
 						: null,
 					selectedSessions.length === 0
 						? para('dc_empty', t('groupEmpty'))
@@ -2088,7 +2279,7 @@ function compareVersions(a, b) {
 			'.dc_main{min-width:0;flex:1;padding:10px 16px;overflow:auto}.dc_detail{gap:6px}.dc_taskBoard{flex-wrap:wrap;gap:6px;display:flex}.dc_taskChips{flex-wrap:wrap;gap:6px;display:flex}.dc_chipOpen{color:var(--dsw-alias-state-warn-primary)}.dc_chipDone{color:var(--dsw-alias-state-success-primary)}.dc_badgeWarn{color:var(--dsw-alias-state-warn-primary)}',
 			'.dc_mobile{flex-direction:column;align-items:flex-start;gap:8px;display:flex}.dc_qr{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-base);width:180px;height:180px}',
 			'.dc_taskList{flex-direction:column;gap:6px;margin:8px 0 10px;padding:0;list-style:none;display:flex}.dc_taskItem{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:3px;padding:8px 10px;display:flex}.dc_taskHead{align-items:center;gap:8px;display:flex}.dc_taskTitle{color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;font-size:12px;line-height:18px;overflow:hidden}.dc_taskItems{flex-direction:column;gap:2px;display:flex}.dc_taskLine{align-items:center;gap:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;display:flex}.dc_taskLineDone{color:var(--dsw-alias-label-caption);text-decoration:line-through}.dc_taskDot{border-radius:999px;background:var(--dsw-alias-state-warn-primary);flex:none;width:6px;height:6px}.dc_taskLineDone .dc_taskDot{background:var(--dsw-alias-state-success-primary)}.dc_taskText{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.dc_readerTasks{border-top:.5px solid var(--dsw-alias-border-l1);flex-direction:column;gap:4px;margin:8px 20px 0;padding-top:8px;display:flex}',
-			'.dc_command{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:6px;margin:6px 0 10px;padding:10px}.dc_commandRow{flex-direction:row;gap:8px;display:flex}.dc_rowAction{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:0 0;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;align-self:center;margin-right:8px;padding:4px 8px;font:inherit;font-size:11px;line-height:16px}.dc_rowAction:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
+			'.dc_select{flex:1;min-width:0;font-size:12px;padding:4px 6px}.dc_command{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:6px;margin:6px 0 10px;padding:10px}.dc_commandRow{flex-direction:row;gap:8px;display:flex}.dc_rowAction{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:0 0;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;align-self:center;margin-right:8px;padding:4px 8px;font:inherit;font-size:11px;line-height:16px}.dc_rowAction:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
 			'@media (max-width:720px){.dc_factValue{max-width:60vw}.dc_head{flex-wrap:wrap}.dc_rail{width:168px}.dc_workspace{flex-direction:column}.dc_rail{border-right:0;border-bottom:.5px solid var(--dsw-alias-border-l1);width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.dc_devices{flex-direction:row;flex-wrap:wrap}}',
 		].join('');
 		//#endregion

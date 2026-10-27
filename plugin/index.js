@@ -298,6 +298,39 @@ export function apply(ctx, config) {
   }
 
   /**
+   * This machine's Workspaces, in the shape the asking machine needs to offer a
+   * picker. A command sent from a peer lands in one of these, so the list has to
+   * cross the wire with the index rather than be guessed from a session row.
+   */
+  function localWorkspaces() {
+    const registry = ctx.get?.('workspaceRegistry');
+    const list = registry?.list?.() ?? [];
+    const rows = [];
+    for (const workspace of list) {
+      const id = String(workspace?.id ?? '');
+      const path = String(workspace?.path ?? '');
+      if (id === '' || path === '') continue;
+      rows.push({ id, path, title: String(workspace?.title ?? path) });
+    }
+    return rows;
+  }
+
+  /** This machine's default directory, which is the fallback "workspace". */
+  function localDefaultDirectory() {
+    const directory = ctx.get?.('workingDirectory')?.defaultDirectory;
+    return typeof directory === 'string' && directory.startsWith('/') ? directory : '';
+  }
+
+  /** This machine's current default model selection, in wire shape. */
+  function localModelSelection() {
+    try {
+      return normalizeModelSelection(ctx.get?.('agentDefaultModel')?.currentSelection?.());
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Rebuild this machine's index and broadcast it.
    * @param {{ force?: boolean }} [options] - `force` skips the throttle.
    */
@@ -315,7 +348,21 @@ export function apply(ctx, config) {
       state.localIndex = entries.map((entry) => toWireEntry(entry, identity.deviceId, identity.name));
       state.lastIndexError = '';
       log('debug', `索引已更新：${state.localIndex.length} 条会话`);
-      await sendTo('*', { kind: KIND.index, deviceId: identity.deviceId, deviceName: identity.name, at: now, shareMemory: settings.shareMemory === true, entries: state.localIndex });
+      const defaultWorkspacePath = localDefaultDirectory();
+      const model = localModelSelection();
+      await sendTo('*', {
+        kind: KIND.index,
+        deviceId: identity.deviceId,
+        deviceName: identity.name,
+        at: now,
+        shareMemory: settings.shareMemory === true,
+        entries: state.localIndex,
+        // "发布命令" needs to name a workspace of THIS machine and the model
+        // strength the sender chose, so both travel with the index.
+        workspaces: localWorkspaces(),
+        ...(defaultWorkspacePath === '' ? {} : { defaultWorkspacePath }),
+        ...(model === undefined ? {} : { model }),
+      });
     } catch (error) {
       state.lastIndexError = error instanceof Error ? error.message : String(error);
       log('warn', `建立索引失败：${state.lastIndexError}`);
@@ -326,6 +373,15 @@ export function apply(ctx, config) {
 
   /** Record a peer index and refresh the roster view. */
   async function acceptIndex(from, payload) {
+    const workspaces = Array.isArray(payload.workspaces)
+      ? payload.workspaces
+        .map((workspace) => ({
+          id: String(workspace?.id ?? ''),
+          path: String(workspace?.path ?? ''),
+          title: String(workspace?.title ?? ''),
+        }))
+        .filter((workspace) => workspace.id !== '' && workspace.path !== '')
+      : [];
     const document = {
       version: PROTOCOL_VERSION,
       deviceId: from,
@@ -333,6 +389,9 @@ export function apply(ctx, config) {
       at: Number(payload.at ?? Date.now()),
       shareMemory: payload.shareMemory !== false,
       entries: Array.isArray(payload.entries) ? payload.entries : [],
+      workspaces,
+      defaultWorkspacePath: typeof payload.defaultWorkspacePath === 'string' ? payload.defaultWorkspacePath : '',
+      ...(normalizeModelSelection(payload.model) === undefined ? {} : { model: normalizeModelSelection(payload.model) }),
     };
     await store.setRemoteIndex(from, document);
     state.peerShareMemory.set(from, document.shareMemory !== false);
@@ -518,6 +577,33 @@ export function apply(ctx, config) {
   }
 
   /**
+   * Turn one peer's raw failure into something a human can act on.
+   *
+   * A stock 4.0.4 receiver cannot admit any prompt (it calls the Host Remote
+   * without the AbortSignal), so the fix has to be on BOTH machines. Saying so
+   * beats echoing a JavaScript TypeError and leaving the operator guessing.
+   */
+  function explainPeerFailure(reason) {
+    const text = String(reason ?? '');
+    if (text.includes('throwIfAborted')) {
+      return `${text}（对端插件低于 4.0.5：它调用 Host 时缺 AbortSignal。把本机这版 plugin/ 同步到对端并重启）`;
+    }
+    return text;
+  }
+
+  /**
+   * A Host Remote method is `(request, signal)`: the transport always supplies
+   * the AbortSignal, so the implementation dereferences it unconditionally
+   * (`signal.throwIfAborted()`). A direct in-process call is NOT that transport,
+   * so it has to supply one itself — without this, every prompt a peer sends
+   * dies on `Cannot read properties of undefined (reading 'throwIfAborted')`
+   * before a single message is admitted.
+   */
+  function promptSignal() {
+    return new AbortController().signal;
+  }
+
+  /**
    * Run a prompt locally, on behalf of a peer.
    *
    * This is what "continue the conversation from the other machine" means here,
@@ -530,6 +616,7 @@ export function apply(ctx, config) {
   async function servePrompt(from, payload, requestId) {
     const sessionId = String(payload?.sessionId ?? '');
     const text = String(payload?.text ?? '').trim();
+    const mode = payload?.mode === 'steer' ? 'steer' : 'queue';
     if (sessionId === '' || text === '') {
       await state.relay?.reply(from, requestId, { kind: KIND.prompt, sessionId, accepted: false, reason: 'bad-request' });
       return;
@@ -540,14 +627,17 @@ export function apply(ctx, config) {
       return;
     }
     try {
-      await controller.prompt({
-        requestId: `dc-${frameId('r')}`,
-        sessionId,
-        mode: payload?.mode === 'steer' ? 'steer' : 'queue',
-        content: [{ type: 'text', text }],
-      });
-      log('info', `已接受来自 ${from.slice(0, 12)} 的消息，写入会话 ${sessionId}`);
-      await state.relay?.reply(from, requestId, { kind: KIND.prompt, sessionId, accepted: true });
+      await controller.prompt(
+        {
+          requestId: `dc-${frameId('r')}`,
+          sessionId,
+          mode,
+          content: [{ type: 'text', text }],
+        },
+        promptSignal(),
+      );
+      log('info', `已接受来自 ${from.slice(0, 12)} 的${mode === 'steer' ? '插话' : '消息'}，写入会话 ${sessionId}`);
+      await state.relay?.reply(from, requestId, { kind: KIND.prompt, sessionId, accepted: true, mode });
       // The prompt changed this machine's index; broadcast it soon so the peer's
       // list view reflects the new activity without waiting a full interval.
       state.lastIndexAt = 0;
@@ -560,21 +650,71 @@ export function apply(ctx, config) {
   }
 
   /**
+   * Accept one model selection from the asking machine, or `undefined`.
+   *
+   * "模型强度由本机决定" means the machine a human is typing on owns the choice:
+   * a peer's default must never quietly replace it. Anything malformed is
+   * dropped here rather than handed to `selectModel`.
+   */
+  function normalizeModelSelection(value) {
+    if (value === null || typeof value !== 'object') return undefined;
+    const provider = typeof value.provider === 'string' ? value.provider.trim() : '';
+    const model = typeof value.model === 'string' ? value.model.trim() : '';
+    if (provider === '' || model === '') return undefined;
+    const reasoningEffort = typeof value.reasoningEffort === 'string' && value.reasoningEffort.trim() !== ''
+      ? value.reasoningEffort.trim()
+      : undefined;
+    return { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) };
+  }
+
+  /**
+   * The latest user text inside an exported conversation, or `''`.
+   *
+   * "接力到本机" replays a task here, so it needs the task itself: the last
+   * thing the human asked for. Reading it from the copied events keeps the
+   * promise independent of any cached index row.
+   */
+  function lastUserText(events) {
+    if (!Array.isArray(events)) return '';
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type !== 'user/message') continue;
+      const content = event?.data?.content;
+      if (!Array.isArray(content)) continue;
+      const text = content
+        .filter((part) => part?.type === 'text')
+        .map((part) => String(part.text ?? ''))
+        .join('')
+        .trim();
+      if (text !== '') return text;
+    }
+    return '';
+  }
+
+  /**
    * Run a command on this machine on behalf of a peer.
    *
    * Unlike the per-session prompt, this may start a NEW session: "发命令给另一台
    * 的 DSH，在另一台上做" is a request to work here, not to continue a specific
-   * conversation.
+   * conversation. The asking machine names the workspace it wants the work to
+   * land in (its idea of THIS machine's workspace list) and the model strength
+   * it wants used; both are applied here before the prompt is admitted.
    */
   async function serveTask(from, payload, requestId) {
     const text = String(payload?.text ?? '').trim();
     const controller = ctx.get?.('sessionController');
     const makeSession = controller?.create;
     const prompt = controller?.prompt;
+    const selectModel = controller?.selectModel;
     if (text === '' || typeof prompt !== 'function') {
       await state.relay?.reply(from, requestId, { kind: KIND.task, accepted: false, reason: 'controller-unavailable' });
       return;
     }
+    const workspaceId = typeof payload?.workspaceId === 'string' && payload.workspaceId !== ''
+      ? payload.workspaceId
+      : undefined;
+    const cwd = typeof payload?.cwd === 'string' && payload.cwd.startsWith('/') ? payload.cwd : undefined;
+    const requestedModel = normalizeModelSelection(payload?.model);
     try {
       let sessionId = String(payload?.sessionId ?? '');
       if (sessionId === '') {
@@ -582,23 +722,48 @@ export function apply(ctx, config) {
           await state.relay?.reply(from, requestId, { kind: KIND.task, accepted: false, reason: 'create-unavailable' });
           return;
         }
-        const created = await makeSession.call(controller, {});
+        // `workspaceId` wins over `cwd`: only a workspace attaches the new
+        // session to the peer's sidebar, which is what "在那台机子的工作区里干活"
+        // means. No location at all is still the peer's default directory.
+        const created = await makeSession.call(
+          controller,
+          workspaceId !== undefined ? { workspaceId } : cwd !== undefined ? { cwd } : {},
+        );
         sessionId = String(created?.sessionId ?? '');
       }
       if (sessionId === '') {
         await state.relay?.reply(from, requestId, { kind: KIND.task, accepted: false, reason: 'create-failed' });
         return;
       }
-      await prompt.call(controller, {
-        requestId: `dc-${frameId('r')}`,
-        sessionId,
-        mode: 'queue',
-        content: [{ type: 'text', text }],
-      });
+      let appliedModel;
+      if (requestedModel !== undefined) {
+        if (typeof selectModel !== 'function') {
+          throw new Error('这个部署没有 sessionController.selectModel，无法按对端指定的模型强度执行');
+        }
+        const applied = await selectModel.call(controller, { sessionId, ...requestedModel });
+        appliedModel = normalizeModelSelection(applied?.selected) ?? requestedModel;
+      }
+      await prompt.call(
+        controller,
+        {
+          requestId: `dc-${frameId('r')}`,
+          sessionId,
+          mode: 'queue',
+          content: [{ type: 'text', text }],
+        },
+        promptSignal(),
+      );
       log('info', `已接受来自 ${from.slice(0, 12)} 的任务，写入会话 ${sessionId}`);
       state.lastIndexAt = 0;
       setTimeout(() => void publishIndex(), 500).unref?.();
-      await state.relay?.reply(from, requestId, { kind: KIND.task, sessionId, accepted: true });
+      await state.relay?.reply(from, requestId, {
+        kind: KIND.task,
+        sessionId,
+        accepted: true,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        ...(cwd === undefined ? {} : { cwd }),
+        ...(appliedModel === undefined ? {} : { model: appliedModel }),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log('warn', `执行对端任务失败：${message}`);
@@ -1039,9 +1204,13 @@ export function apply(ctx, config) {
     const identity = store.getIdentity();
     const relay = state.relay?.describe() ?? { connected: false, state: 'idle', relayUrl: '', channelShort: '', httpMode: false };
     const rows = await allRows();
-    const peers = store.getPeers()
-      .filter((peer) => peer.deviceId !== identity.deviceId)
-      .map((peer) => ({
+    const roster = store.getPeers().filter((peer) => peer.deviceId !== identity.deviceId);
+    const peers = await Promise.all(roster.map(async (peer) => {
+      // The peer's Workspaces and model strength come from its own index; a
+      // device that never published one simply offers no picker.
+      const document = await store.getRemoteIndex(peer.deviceId).catch(() => undefined);
+      const workspaces = Array.isArray(document?.workspaces) ? document.workspaces : [];
+      return {
         deviceId: peer.deviceId,
         name: peer.name ?? peer.deviceId.slice(0, 8),
         online: peer.online === true,
@@ -1049,7 +1218,11 @@ export function apply(ctx, config) {
         fingerprint: '',
         sessionCount: rows.filter((row) => row.ownerId === peer.deviceId).length,
         shareMemory: state.peerShareMemory.get(peer.deviceId) !== false,
-      }));
+        workspaces,
+        defaultWorkspacePath: typeof document?.defaultWorkspacePath === 'string' ? document.defaultWorkspacePath : '',
+        model: normalizeModelSelection(document?.model),
+      };
+    }));
     return {
       self: {
         deviceId: identity.deviceId,
@@ -1105,6 +1278,34 @@ export function apply(ctx, config) {
    * One browser action.
    * @param {object} body - the decoded request body.
    */
+  /**
+   * The models this machine can route right now, for the "模型强度由本机决定"
+   * picker. Cached briefly so opening the panel does not re-resolve every
+   * provider on each poll.
+   */
+  async function buildModelCatalog() {
+    const now = Date.now();
+    if (state.modelCatalog !== undefined && now - state.modelCatalog.at < 60_000) return state.modelCatalog.value;
+    const controller = ctx.get?.('sessionController');
+    let value;
+    if (typeof controller?.modelCatalog === 'function') {
+      try {
+        value = await controller.modelCatalog();
+      } catch (error) {
+        value = {
+          default: localModelSelection() ?? null,
+          routableProviders: [],
+          groups: [],
+          failures: [{ id: 'catalog', name: '目录', message: error instanceof Error ? error.message : String(error) }],
+        };
+      }
+    } else {
+      value = { default: localModelSelection() ?? null, routableProviders: [], groups: [], failures: [] };
+    }
+    state.modelCatalog = { at: now, value };
+    return value;
+  }
+
   async function command(body) {
     const action = String(body?.action ?? '');
     // A build older than the floor may only read the list (so the panel can
@@ -1113,6 +1314,8 @@ export function apply(ctx, config) {
       throw badRequest(`此版本（v${PLUGIN_VERSION}）已封停，请升级到 v${MIN_VERSION} 或更高版本`);
     }
     if (action === 'list') return buildListView();
+
+    if (action === 'model-catalog') return buildModelCatalog();
 
     if (action === 'configure') {
       const patch = {};
@@ -1242,8 +1445,10 @@ export function apply(ctx, config) {
       }
       const reply = await askPeer(deviceId, { need: KIND.prompt, sessionId, text, mode });
       if (reply === undefined) throw notFound('对端没有在超时时间内确认，请稍后重试');
-      if (reply.accepted !== true) throw badRequest(`对端拒绝执行：${String(reply.reason ?? 'unknown')}`);
-      return { accepted: true, deliveredTo: deviceId };
+      if (reply.accepted !== true) throw badRequest(`对端拒绝执行：${explainPeerFailure(reply.reason ?? 'unknown')}`);
+      // The peer states which delivery it actually admitted: a steer that landed
+      // mid-turn must never be reported as an ordinary queued message.
+      return { accepted: true, deliveredTo: deviceId, mode: reply.mode === 'steer' ? 'steer' : 'queue' };
     }
 
     if (action === 'inherit') {
@@ -1271,6 +1476,39 @@ export function apply(ctx, config) {
       // it to show up without waiting for the next index tick.
       state.lastIndexAt = 0;
       setTimeout(() => void publishIndex({ force: true }), 300).unref?.();
+      // "接力到本机" is not a copy: the task must actually RUN here. Copying the
+      // history leaves an idle transcript; admitting one prompt into the new
+      // local session is what makes this machine do the work with its own model
+      // and tools.
+      const task = lastUserText(reply.events);
+      let ran = false;
+      let runError = '';
+      if (body.run !== false) {
+        const controller = ctx.get?.('sessionController');
+        if (typeof controller?.prompt === 'function') {
+          const directive = task === ''
+            ? '接力到本机：这条会话现在由本机接着执行。请把上面的任务在本机完整跑一遍并给出最终结果。'
+            : `接力到本机：这条任务现在由本机执行，请在本机把它完整跑一遍并给出最终结果（不要只复述前面的对话，也不要假设对端还会继续做）。\n\n原任务：\n${task}`;
+          try {
+            await controller.prompt(
+              {
+                requestId: `dc-${frameId('r')}`,
+                sessionId: created.sessionId,
+                mode: 'queue',
+                content: [{ type: 'text', text: directive }],
+              },
+              promptSignal(),
+            );
+            ran = true;
+            state.lastIndexAt = 0;
+          } catch (error) {
+            runError = error instanceof Error ? error.message : String(error);
+            log('warn', `接力到本机已落地会话 ${created.sessionId}，但启动本机执行失败：${runError}`);
+          }
+        } else {
+          runError = '这个部署没有 sessionController，无法在本机启动执行';
+        }
+      }
       return {
         sessionId: created.sessionId,
         sourceSessionId: sessionId,
@@ -1278,6 +1516,9 @@ export function apply(ctx, config) {
         title: typeof reply.title === 'string' ? reply.title : '',
         eventCount: created.eventCount,
         cwd: created.cwd,
+        ran,
+        task,
+        runError,
       };
     }
 
@@ -1290,10 +1531,28 @@ export function apply(ctx, config) {
       if (peer === undefined || peer.online !== true || state.relay?.connected !== true) {
         throw notFound('对端设备当前不在线，无法下发任务');
       }
-      const reply = await askPeer(deviceId, { need: KIND.task, text }, 60_000);
+      // The asking machine picks the target's workspace and the model strength;
+      // both are forwarded verbatim so the peer cannot quietly substitute its
+      // own defaults.
+      const workspaceId = typeof body.workspaceId === 'string' && body.workspaceId !== '' ? body.workspaceId : undefined;
+      const cwd = typeof body.cwd === 'string' && body.cwd.startsWith('/') ? body.cwd : undefined;
+      const model = normalizeModelSelection(body.model);
+      const reply = await askPeer(deviceId, {
+        need: KIND.task,
+        text,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        ...(cwd === undefined ? {} : { cwd }),
+        ...(model === undefined ? {} : { model }),
+      }, 60_000);
       if (reply === undefined) throw notFound('对端没有在超时时间内确认，请稍后重试');
-      if (reply.accepted !== true) throw badRequest(`对端拒绝执行：${String(reply.reason ?? 'unknown')}`);
-      return { accepted: true, sessionId: String(reply.sessionId ?? ''), deviceId };
+      if (reply.accepted !== true) throw badRequest(`对端拒绝执行：${explainPeerFailure(reply.reason ?? 'unknown')}`);
+      return {
+        accepted: true,
+        sessionId: String(reply.sessionId ?? ''),
+        deviceId,
+        workspaceId: typeof reply.workspaceId === 'string' ? reply.workspaceId : '',
+        model: normalizeModelSelection(reply.model) ?? model,
+      };
     }
 
     if (action === 'station-create') {

@@ -95,6 +95,42 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.4/in
 
 ---
 
+## v4.0.5：跨机指令真的能落地——接力在本机跑、插话被服从、命令带工作区与模型强度
+
+v4.0.4 及以前，**从另一台机器发过来的任何输入都进不了对端**。根因是一行签名：
+
+```js
+async prompt(request, signal) { signal.throwIfAborted(); /* … */ }
+```
+
+Host 的 Remote 方法由传输层补第二个参数 `AbortSignal`，而插件是**进程内直调**：
+`sessionController.prompt(request)` 少传了 signal，于是在 `throwIfAborted` 处必抛
+`TypeError: Cannot read properties of undefined (reading 'throwIfAborted')`，
+被 `servePrompt` / `serveTask` 的 catch 吞成 `accepted:false` 回给发送方。
+插话、发布命令、手机下发共用这条路径，因此全部失效——而 e2e 一直全绿，
+是因为测试桩的 `prompt` 不看第二个参数（4.0.5 起桩会抛同样的 TypeError，回归跑得出来）。
+
+同版把三件事按使用方的语义补齐：
+
+- **接力到本机 = 在本机把任务跑一遍。** 继承完事件日志后立刻向新本机会话投递一条
+  「接力到本机，请把它完整跑一遍」的指令（附原任务正文），由本机的模型和工具真正执行；
+  阅读器里的「继承到本机」仍是纯复制。回执带 `ran` / `task` / `runError`。
+- **插话必须被听。** 仍走 `steer`，但对端回执带回**实际生效的投递方式**：只有真的进了
+  运行中的那一轮才显示「已插话」，否则显示「已排队」，不再把排队冒充成插话。
+- **发布命令带工作区与模型强度。** 对端的工作区列表与默认目录随索引广播；命令卡多了
+  「对端工作区 / 模型强度 / 思考强度」三个下拉（默认取**本机**当前模型）。对端用
+  `create({ workspaceId })` 落进指定工作区，再 `selectModel(…)` 装上本机选的模型强度，
+  最后才投递任务；模型不可路由会明确失败，不静默降级。
+
+兼容性：线协议仍是 v3，新增字段是**附加**的。4.0.4 的对端会忽略
+`workspaces` / `model` / `workspaceId`，命令仍按它自己的默认目录与默认模型执行；
+但 4.0.4 作为**接收方**依旧拒收一切输入（根因在接收方），所以两端都要升到 4.0.5。
+对端偏旧时，失败信息会直接点明「对端插件低于 4.0.5」。
+
+验证：`relay-smoke` 40 项、`client-check` 109 项、`deep-connect-e2e` 116 项，全过。
+
+---
+
 ## v4.0.4：五项承诺的核实与补齐
 
 逐条对照 4.0.x 的实现与测试，这一版补了三处真实缺口：

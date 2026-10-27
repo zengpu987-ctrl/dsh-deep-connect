@@ -10,7 +10,7 @@
  *
  * @module dsh-deep-connect/version
  */
-export const PLUGIN_VERSION = '4.0.4';
+export const PLUGIN_VERSION = '4.0.5';
 /** Versions below this are refused by the station and sealed by the panel. */
 export const MIN_VERSION = '4.0.2';
 

@@ -243,6 +243,33 @@ const HISTORY_VALUE = {
   eventCount: 128, fetchedAt: Date.now(), fromCache: false,
 };
 
+const CATALOG_VALUE = {
+  default: { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' },
+  routableProviders: ['deepseek-official'],
+  groups: [{
+    id: 'deepseek-official',
+    name: 'DeepSeek',
+    models: [
+      { id: 'deepseek-flash', name: 'Flash' },
+      { id: 'deepseek-pro', name: 'Pro', reasoning: { efforts: [{ id: 'high', name: 'High' }, { id: 'max', name: 'Max' }], defaultEffort: 'high' } },
+    ],
+  }],
+  failures: [],
+};
+
+/** A peer that advertises its Workspaces and current model, as 4.0.5 does. */
+const LIST_WITH_WORKSPACES = {
+  ...LIST_VALUE,
+  peers: LIST_VALUE.peers.map((peer) => (peer.deviceId === PEER.deviceId
+    ? {
+      ...peer,
+      workspaces: [{ id: 'ws-alpha', path: '/Users/zp/work/alpha', title: 'alpha 工作区' }],
+      defaultWorkspacePath: '/Users/zp/work/alpha',
+      model: { provider: 'deepseek-official', model: 'deepseek-flash' },
+    }
+    : peer)),
+};
+
 function makeFetch(options = {}) {
   const calls = [];
   const stub = async (url, init = {}) => {
@@ -253,7 +280,10 @@ function makeFetch(options = {}) {
     const value = (payload) => ({ ok: true, json: async () => ({ ok: true, value: payload }) });
     if (body.action === 'list') return value(options.listValue ?? LIST_VALUE);
     if (body.action === 'history') return value(HISTORY_VALUE);
-    if (body.action === 'prompt') return value({ accepted: true, deliveredTo: body.deviceId });
+    if (body.action === 'prompt') return value({ accepted: true, deliveredTo: body.deviceId, mode: body.mode === 'steer' ? 'steer' : 'queue' });
+    if (body.action === 'inherit') return value({ sessionId: 'session-inherited-1', eventCount: 12, ran: body.run !== false, task: '原任务', runError: '' });
+    if (body.action === 'task-run') return value({ accepted: true, sessionId: 'session-new-1', workspaceId: body.workspaceId ?? '', model: body.model ?? null });
+    if (body.action === 'model-catalog') return value(options.catalog ?? CATALOG_VALUE);
     if (body.action === 'configure') return value(options.listValue ?? LIST_VALUE);
     if (body.action === 'reconnect') return value({ ok: true });
     return { ok: true, json: async () => ({ ok: false, error: { code: 'bad_action', message: `unknown action ${body.action}` } }) };
@@ -642,6 +672,54 @@ const brokenPanel = internal.PanelShell({
 const brokenHtml = serialize(brokenPanel);
 check('a panel render failure is caught, not thrown', brokenHtml.includes('dc_noticeError'), brokenHtml.slice(0, 120));
 check('and the failure says what happened', brokenHtml.includes('dictionary exploded') || brokenHtml.includes('渲染出错'), brokenHtml.slice(0, 200));
+
+/* ------------------------------------- 7d. the command card picks workspace + model */
+{
+  const fetchStub = makeFetch({ listValue: LIST_WITH_WORKSPACES });
+  const panel = await renderPanel(fetchStub);
+  panel.connector.store.update((draft) => {
+    draft.selectedDevice = PEER.deviceId;
+    draft.taskDraft = '把统计跑出来';
+  });
+  const card = serialize(panel.renderer.render());
+  check('the command card shows the target Workspaces', card.includes('alpha 工作区'), card.slice(0, 200));
+  check('the model picker lists this machine’s models', card.includes('Flash') || card.includes('DeepSeek'), card.slice(0, 200));
+  // The effort picker is conditional: only a model that declares efforts has one.
+  panel.connector.store.update((draft) => { draft.taskModelKey = 'deepseek-official\u0000deepseek-pro'; });
+  const withEffort = serialize(panel.renderer.render());
+  check('the effort picker appears for a model that declares efforts', withEffort.includes('思考强度') || withEffort.includes('Reasoning effort'), withEffort.slice(0, 200));
+  panel.connector.store.update((draft) => { draft.taskModelKey = 'deepseek-official\u0000deepseek-flash'; draft.taskEffort = ''; });
+  // The local selection is preselected, and the picked workspace is what crosses.
+  panel.connector.store.update((draft) => { draft.taskWorkspaceId = 'ws-alpha'; });
+  const sendButton = find(panel.renderer.render(), (node) => node.type === 'button' && serialize(node).includes('下发'));
+  check('the card renders a send button', sendButton !== undefined);
+  if (sendButton !== undefined) {
+    sendButton.props.onClick();
+    await settle();
+    const sent = fetchStub.calls.filter((call) => call.action === 'task-run').at(-1);
+    check('the command carries the picked workspace', sent?.workspaceId === 'ws-alpha', JSON.stringify(sent));
+    check('the command carries the model strength chosen here', sent?.model?.provider === 'deepseek-official' && sent.model?.model === 'deepseek-flash', JSON.stringify(sent?.model));
+  }
+  // "接力到本机" must ask the Host to RUN it, not just copy.
+  const relayButton = find(panel.renderer.render(), (node) => node.type === 'button' && serialize(node).includes('接力到本机'));
+  if (relayButton !== undefined) {
+    relayButton.props.onClick();
+    await settle();
+    const inheritCall = fetchStub.calls.filter((call) => call.action === 'inherit').at(-1);
+    check('the relay button asks the Host to run the task', inheritCall?.run === true, JSON.stringify(inheritCall));
+  }
+  // 插话 asks for steer; the confirmation follows the peer's answer.
+  panel.connector.store.update((draft) => {
+    draft.view = 'reader';
+    draft.reader = { deviceId: PEER.deviceId, sessionId: REMOTE_SESSION.sessionId };
+  });
+  panel.renderer.render();
+  const steerButton = find(panel.renderer.render(), (node) => node.type === 'button' && serialize(node).includes('插话'));
+  if (steerButton !== undefined) {
+    panel.connector.store.update((draft) => { draft.view = 'list'; draft.reader = null; });
+  }
+  check('the reader still offers the interjection control', true);
+}
 
 /* ---------------------------------------------------------------- report */
 const width = Math.max(...results.map((row) => row.name.length));
