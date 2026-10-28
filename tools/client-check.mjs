@@ -575,6 +575,12 @@ check('a build below the floor shows the sealed screen', sealedHtml.includes('�
 check('the sealed screen hides the panel', !sealedHtml.includes('data-dc="rail"'));
 check('the sealed screen names the upgrade command', sealedHtml.includes('dsh-deep-connect@v4.0.2/install.sh'));
 
+/* ------------------------------------------------ 7d. cosmic theme (4.3.0) */
+check('the panel carries a cosmic layer', first.html.includes('data-dc="cosmos"'));
+check('the cosmic layer is purely decorative', first.html.includes('aria-hidden="true"'));
+check('the cosmic layer never takes pointer events', /\.dc_cosmos\{[^}]*pointer-events:none/.test(internal.css));
+check('the star field respects reduced motion', /@media \(prefers-reduced-motion:reduce\)\{[^}]*dc_cosmos/.test(internal.css));
+
 /* ---------------------------------------------------------------- 8. errors */
 const down = await renderPanel(makeFetch({ networkFail: true }));
 check('network failure says 连接本机 Host 失败', serialize(down.tree).includes('连接本机 Host 失败'), serialize(down.tree).slice(0, 200));

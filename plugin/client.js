@@ -1824,6 +1824,17 @@ function compareVersions(a, b) {
 					),
 				);
 			}
+			// A non-interactive cosmos layer: stars, nebula and ringed planets sit
+			// behind every panel surface and never take pointer events.
+			const cosmos = h(
+				'div',
+				{ className: 'dc_cosmos', 'data-dc': 'cosmos', 'aria-hidden': 'true' },
+				span('dc_cosmosNebula'),
+				span('dc_cosmosStars'),
+				span('dc_cosmosPlanet dc_cosmosPlanetA', span('dc_cosmosRing')),
+				span('dc_cosmosPlanet dc_cosmosPlanetB'),
+				span('dc_cosmosPlanet dc_cosmosPlanetC', span('dc_cosmosRing dc_cosmosRingTilt')),
+			);
 			const header = h(
 				'header',
 				{ className: 'dc_head', 'data-window-drag': true },
@@ -2134,15 +2145,16 @@ function compareVersions(a, b) {
 			);
 
 			if (state.view === 'reader') {
-				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, el(ReaderView, { t, state, onBack: actions.closeReader, onSend: actions.sendPrompt, onInherit: actions.inheritSession, onPane: (pane) => store.update((draft) => { draft.readerPane = pane === 'trajectory' ? 'trajectory' : 'dialogue'; }) }));
+				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, cosmos, header, errorLine, el(ReaderView, { t, state, onBack: actions.closeReader, onSend: actions.sendPrompt, onInherit: actions.inheritSession, onPane: (pane) => store.update((draft) => { draft.readerPane = pane === 'trajectory' ? 'trajectory' : 'dialogue'; }) }));
 			}
 			if (state.status === 'loading' && self === null) {
-				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, header, errorLine, div('dc_loading', t('loading')));
+				return h('section', { className: 'dc_root', 'data-dc': 'panel' }, cosmos, header, errorLine, div('dc_loading', t('loading')));
 			}
 			if (unconfigured) {
 				return h(
 					'section',
 					{ className: 'dc_root', 'data-dc': 'panel' },
+					cosmos,
 					header,
 					errorLine,
 					div(
@@ -2155,6 +2167,7 @@ function compareVersions(a, b) {
 			return h(
 				'section',
 				{ className: 'dc_root', 'data-dc': 'panel' },
+				cosmos,
 				header,
 				errorLine,
 				state.view === 'settings'
@@ -2355,6 +2368,14 @@ function compareVersions(a, b) {
 			'.dc_composer:focus-within{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 38%,var(--dsw-alias-border-l2));box-shadow:0 0 0 4px color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent),0 18px 40px color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}',
 			'.dc_scroll,.dc_rail,.dc_main,.dc_turnBody{scroll-behavior:smooth}.dc_rowOpen:focus-visible,.dc_devItem:focus-visible{outline-offset:3px}',
 			'@media (prefers-reduced-motion:reduce){.dc_root::before,.dc_root::after,.dc_dot_connected .dc_dotCore,.dc_rows>li,.dc_devices>li,.dc_taskList>li,.dc_turns>li,.dc_settings,.dc_command,.dc_searchRow,.dc_memory{animation:none}.dc_tab,.dc_switch,.dc_switchKnob{transition:none}}',
+			// v4.3 cosmos theme: a quiet star field with two ringed planets.
+			'.dc_cosmos{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden;contain:strict}.dc_cosmosStars{position:absolute;inset:-10%;background-image:radial-gradient(1.2px 1.2px at 12% 18%,color-mix(in srgb,var(--dsw-alias-label-primary) 62%,transparent),transparent 60%),radial-gradient(1px 1px at 28% 72%,color-mix(in srgb,var(--dsw-alias-label-primary) 42%,transparent),transparent 60%),radial-gradient(1.4px 1.4px at 46% 34%,color-mix(in srgb,var(--dsw-alias-brand-primary) 70%,transparent),transparent 60%),radial-gradient(1px 1px at 63% 81%,color-mix(in srgb,var(--dsw-alias-label-primary) 36%,transparent),transparent 60%),radial-gradient(1.2px 1.2px at 78% 22%,color-mix(in srgb,var(--dsw-alias-label-primary) 52%,transparent),transparent 60%),radial-gradient(1px 1px at 88% 62%,color-mix(in srgb,var(--dsw-alias-brand-primary) 48%,transparent),transparent 60%),radial-gradient(1.1px 1.1px at 7% 88%,color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,transparent),transparent 60%),radial-gradient(1px 1px at 55% 8%,color-mix(in srgb,var(--dsw-alias-label-primary) 30%,transparent),transparent 60%);opacity:.7;animation:dc_twinkle 9s ease-in-out infinite alternate}@keyframes dc_twinkle{0%{opacity:.45}100%{opacity:.8}}',
+			'.dc_cosmosNebula{position:absolute;inset:-20%;background:radial-gradient(closest-side at 18% 12%,color-mix(in srgb,var(--dsw-alias-brand-primary) 26%,transparent),transparent 68%),radial-gradient(closest-side at 84% 78%,color-mix(in srgb,var(--dsw-alias-state-success-primary) 16%,transparent),transparent 70%),radial-gradient(closest-side at 70% 18%,color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent),transparent 60%);filter:blur(10px);animation:dc_nebula 26s ease-in-out infinite alternate}@keyframes dc_nebula{0%{transform:translate3d(-1.5%,-1%,0) scale(1)}100%{transform:translate3d(2%,1.5%,0) scale(1.06)}}',
+			'.dc_cosmosPlanet{position:absolute;border-radius:50%;background:radial-gradient(circle at 32% 28%,color-mix(in srgb,var(--dsw-alias-brand-primary) 70%,var(--dsw-alias-bg-base)),color-mix(in srgb,var(--dsw-alias-brand-primary) 26%,var(--dsw-alias-bg-base)) 62%,color-mix(in srgb,var(--dsw-alias-bg-base) 82%,transparent));box-shadow:inset -10px -14px 30px color-mix(in srgb,var(--dsw-alias-bg-base) 65%,transparent),0 0 40px color-mix(in srgb,var(--dsw-alias-brand-primary) 18%,transparent);opacity:.55}',
+			'.dc_cosmosPlanetA{width:190px;height:190px;right:-52px;top:-48px;animation:dc_float 14s ease-in-out infinite alternate}.dc_cosmosPlanetB{width:96px;height:96px;left:-30px;bottom:14%;background:radial-gradient(circle at 34% 30%,color-mix(in srgb,var(--dsw-alias-state-success-primary) 58%,var(--dsw-alias-bg-base)),color-mix(in srgb,var(--dsw-alias-state-success-primary) 20%,var(--dsw-alias-bg-base)) 64%,color-mix(in srgb,var(--dsw-alias-bg-base) 82%,transparent));animation:dc_float 18s ease-in-out -6s infinite alternate}.dc_cosmosPlanetC{width:54px;height:54px;right:18%;bottom:8%;opacity:.4;animation:dc_float 11s ease-in-out -3s infinite alternate}',
+			'.dc_cosmosRing{position:absolute;left:50%;top:50%;width:168%;height:46%;border:1.5px solid color-mix(in srgb,var(--dsw-alias-label-primary) 24%,transparent);border-radius:50%;transform:translate(-50%,-50%) rotate(-18deg);box-shadow:0 0 18px color-mix(in srgb,var(--dsw-alias-brand-primary) 14%,transparent)}.dc_cosmosRingTilt{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 30%,transparent);transform:translate(-50%,-50%) rotate(24deg)}@keyframes dc_float{0%{transform:translate3d(0,0,0)}100%{transform:translate3d(-10px,12px,0)}}',
+			'@media (prefers-reduced-motion:reduce){.dc_cosmosStars,.dc_cosmosNebula,.dc_cosmosPlanet{animation:none}}',
+			'@media (max-width:720px){.dc_cosmosPlanetA{width:120px;height:120px;right:-44px;top:-36px}.dc_cosmosPlanetB{width:64px;height:64px}}',
 		].join('');
 		//#endregion
 
