@@ -169,6 +169,8 @@ window.__ModuleLoader__.load({
 				selectedDevice: '',
 				/** The command being typed for another device. */
 				taskDraft: '',
+				/** Session/task search in the main pane. */
+				query: '',
 				/** The Workspace of the TARGET device this command should land in; '' = its default. */
 				taskWorkspaceId: '',
 				/** `provider\u0000model` chosen here for the target's run; '' = its default. */
@@ -529,6 +531,10 @@ function compareVersions(a, b) {
 			deviceSessions: '会话 {n}',
 			selectDevice: '选择左侧设备查看任务',
 			allDevices: '全部设备',
+			searchPlaceholder: '搜索会话、任务或提示词…',
+			searchEmpty: '没有匹配的会话。',
+			searchCount: '{n}/{m} 条',
+			devOpenTasks: '{n} 项待办',
 			settingsTitle: '连接设置',
 			settingsRelay: '中继地址',
 			settingsRelayHint: '例如 wss://relay.example.com，两端必须填同一个。',
@@ -713,6 +719,10 @@ function compareVersions(a, b) {
 			deviceSessions: '{n} sessions',
 			selectDevice: 'Pick a device on the left to see its tasks',
 			allDevices: 'All devices',
+			searchPlaceholder: 'Search sessions, tasks or prompts…',
+			searchEmpty: 'No matching sessions.',
+			searchCount: '{n}/{m}',
+			devOpenTasks: '{n} open',
 			settingsTitle: 'Connection settings',
 			settingsRelay: 'Relay URL',
 			settingsRelayHint: 'For example wss://relay.example.com — both machines must use the same one.',
@@ -1902,6 +1912,11 @@ function compareVersions(a, b) {
 					model: peer?.model !== null && typeof peer?.model === 'object' ? peer.model : undefined,
 				})),
 			];
+			for (const device of deviceList) {
+				device.openTasks = sessions
+					.filter((row) => String(row?.ownerId ?? '') === device.deviceId)
+					.reduce((total, row) => total + Number(row?.tasks?.open ?? 0), 0);
+			}
 			// '' means the overview: every device's sessions in one list. Clicking a
 			// device card narrows it to that machine's tasks.
 			const selectedDevice = state.selectedDevice === ''
@@ -1910,6 +1925,18 @@ function compareVersions(a, b) {
 			const selectedSessions = selectedDevice === null
 				? sessions
 				: sessions.filter((row) => String(row?.ownerId ?? '') === selectedDevice.deviceId);
+			const query = String(state.query ?? '').trim().toLowerCase();
+			const visibleSessions = query === ''
+				? selectedSessions
+				: selectedSessions.filter((row) => {
+					const haystack = [
+						row?.title,
+						row?.sessionId,
+						...(Array.isArray(row?.userPrompts) ? row.userPrompts : []),
+						...(Array.isArray(row?.tasks?.items) ? row.tasks.items.map((item) => item?.text) : []),
+					].filter((part) => typeof part === 'string').join(' ').toLowerCase();
+					return haystack.includes(query);
+				});
 			const taskTotals = selectedSessions.reduce((total, row) => {
 				const tasks = row?.tasks !== null && typeof row?.tasks === 'object' ? row.tasks : {};
 				total.open += Number(tasks.open ?? 0);
@@ -1958,6 +1985,7 @@ function compareVersions(a, b) {
 								span(cx('dc_devDot', device.online ? 'dc_devDotOn' : 'dc_devDotOff')),
 								span('dc_devName', device.name, { title: device.name }),
 								span('dc_devMeta', t('deviceSessions').replace('{n}', String(count(device.sessionCount)))),
+								device.openTasks > 0 ? span('dc_devBadge', String(device.openTasks), { title: t('devOpenTasks').replace('{n}', String(device.openTasks)) }) : null,
 								device.isRemote === false ? span('dc_badge', t('thisDevice')) : null,
 								device.shareMemory === false ? span('dc_badge dc_badgeWarn', t('memoryOff')) : null,
 							],
@@ -1987,12 +2015,23 @@ function compareVersions(a, b) {
 							taskTotals.team > 0 ? span('dc_chip', t('taskTeam').replace('{n}', String(taskTotals.team))) : null,
 						),
 					),
-					selectedSessions.filter((row) => Array.isArray(row?.tasks?.items) && row.tasks.items.length > 0).length === 0
+					selectedSessions.length === 0
+						? null
+						: div(
+							'dc_searchRow',
+							h('input', {
+								className: 'dc_input dc_search', type: 'search', value: state.query ?? '',
+								placeholder: t('searchPlaceholder'), 'aria-label': t('searchPlaceholder'),
+								onChange: (event) => store.update((draft) => { draft.query = event.target.value; }),
+							}),
+							span('dc_fieldHint', t('searchCount').replace('{n}', String(visibleSessions.length)).replace('{m}', String(selectedSessions.length))),
+						),
+					visibleSessions.filter((row) => Array.isArray(row?.tasks?.items) && row.tasks.items.length > 0).length === 0
 						? null
 						: list(
 							'dc_taskList',
 							'task',
-							selectedSessions.filter((row) => Array.isArray(row?.tasks?.items) && row.tasks.items.length > 0).map((row) => h(
+							visibleSessions.filter((row) => Array.isArray(row?.tasks?.items) && row.tasks.items.length > 0).map((row) => h(
 								'li',
 								{ className: 'dc_taskItem', key: `task:${row.sessionId}` },
 								span('dc_taskHead',
@@ -2075,7 +2114,9 @@ function compareVersions(a, b) {
 						: null,
 					selectedSessions.length === 0
 						? para('dc_empty', t('groupEmpty'))
-						: list('dc_rows', null, selectedSessions.map((entry) => el(SessionRow, {
+						: visibleSessions.length === 0
+							? para('dc_empty', t('searchEmpty'))
+							: list('dc_rows', null, visibleSessions.map((entry) => el(SessionRow, {
 							key: `row:${selectedDevice?.deviceId ?? entry?.ownerId ?? ''}:${entry?.sessionId ?? ''}`,
 							entry,
 							t,
@@ -2281,6 +2322,28 @@ function compareVersions(a, b) {
 			'.dc_taskList{flex-direction:column;gap:6px;margin:8px 0 10px;padding:0;list-style:none;display:flex}.dc_taskItem{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:3px;padding:8px 10px;display:flex}.dc_taskHead{align-items:center;gap:8px;display:flex}.dc_taskTitle{color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;font-size:12px;line-height:18px;overflow:hidden}.dc_taskItems{flex-direction:column;gap:2px;display:flex}.dc_taskLine{align-items:center;gap:6px;color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;display:flex}.dc_taskLineDone{color:var(--dsw-alias-label-caption);text-decoration:line-through}.dc_taskDot{border-radius:999px;background:var(--dsw-alias-state-warn-primary);flex:none;width:6px;height:6px}.dc_taskLineDone .dc_taskDot{background:var(--dsw-alias-state-success-primary)}.dc_taskText{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.dc_readerTasks{border-top:.5px solid var(--dsw-alias-border-l1);flex-direction:column;gap:4px;margin:8px 20px 0;padding-top:8px;display:flex}',
 			'.dc_select{flex:1;min-width:0;font-size:12px;padding:4px 6px}.dc_command{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);flex-direction:column;gap:6px;margin:6px 0 10px;padding:10px}.dc_commandRow{flex-direction:row;gap:8px;display:flex}.dc_rowAction{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-lg);background:0 0;color:var(--dsw-alias-label-secondary);cursor:pointer;flex:none;align-self:center;margin-right:8px;padding:4px 8px;font:inherit;font-size:11px;line-height:16px}.dc_rowAction:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
 			'@media (max-width:720px){.dc_factValue{max-width:60vw}.dc_head{flex-wrap:wrap}.dc_rail{width:168px}.dc_workspace{flex-direction:column}.dc_rail{border-right:0;border-bottom:.5px solid var(--dsw-alias-border-l1);width:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.dc_devices{flex-direction:row;flex-wrap:wrap}}',
+			// v4.1 frosted-glass skin: layered translucency, large radii, soft light.
+			'.dc_root{background:radial-gradient(1100px 560px at 8% -12%,color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent),transparent 62%),radial-gradient(900px 520px at 102% -6%,color-mix(in srgb,var(--dsw-alias-state-success-primary) 8%,transparent),transparent 58%),var(--dsw-alias-bg-base)}',
+			'.dc_head{position:relative;z-index:2;padding:16px 22px 12px;border-bottom:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 65%,transparent);background:color-mix(in srgb,var(--dsw-alias-bg-base) 70%,transparent);-webkit-backdrop-filter:blur(24px) saturate(170%);backdrop-filter:blur(24px) saturate(170%)}',
+			'.dc_title{font-weight:600;letter-spacing:.01em}.dc_headFacts{gap:16px}.dc_factValue{max-width:30vw}',
+			'.dc_ghost,.dc_primary{height:30px;border-radius:999px;padding:0 15px;transition:background .16s ease,box-shadow .16s ease,transform .16s ease,color .16s ease}.dc_ghost{border-width:1px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 55%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}.dc_ghost:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 16px color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}.dc_primary{background:linear-gradient(135deg,var(--dsw-alias-button-primary-fill),color-mix(in srgb,var(--dsw-alias-brand-primary) 78%,var(--dsw-alias-button-primary-fill)));box-shadow:0 8px 20px color-mix(in srgb,var(--dsw-alias-brand-primary) 26%,transparent)}.dc_primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 10px 24px color-mix(in srgb,var(--dsw-alias-brand-primary) 34%,transparent)}.dc_iconBtn{border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 60%,transparent);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 55%,transparent)}',
+			'.dc_workspace{gap:16px;padding:0 16px 16px}.dc_rail{width:238px;padding:14px;gap:10px;border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 65%,transparent);border-radius:24px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 62%,transparent);-webkit-backdrop-filter:blur(26px) saturate(160%);backdrop-filter:blur(26px) saturate(160%);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary) 7%,transparent),0 20px 48px color-mix(in srgb,var(--dsw-alias-label-primary) 9%,transparent)}.dc_main{padding:2px 2px 4px 0}',
+			'.dc_memory,.dc_device,.dc_row,.dc_taskItem,.dc_command,.dc_settings,.dc_blank,.dc_notice,.dc_composer,.dc_turn,.dc_station,.dc_mobile{border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 62%,transparent);border-radius:20px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 66%,transparent);-webkit-backdrop-filter:blur(20px) saturate(150%);backdrop-filter:blur(20px) saturate(150%);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent),0 8px 24px color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent)}',
+			'.dc_row,.dc_device,.dc_devItem,.dc_taskItem,.dc_ghost,.dc_tab,.dc_rowAction{transition:background .16s ease,box-shadow .16s ease,transform .16s ease,border-color .16s ease}',
+			'.dc_row:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 28%,var(--dsw-alias-border-l1));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent),0 14px 34px color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent)}.dc_rowOpen{padding:10px 14px;gap:5px}.dc_rowAction{border-radius:999px}',
+			'.dc_devItem{border-radius:16px;padding:9px 11px}.dc_devItemOn{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 32%,transparent);background:linear-gradient(135deg,color-mix(in srgb,var(--dsw-alias-brand-primary) 16%,transparent),color-mix(in srgb,var(--dsw-alias-bg-layer-1) 40%,transparent));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}.dc_devBadge{min-width:20px;height:18px;padding:0 6px;border-radius:999px;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 18%,transparent);color:var(--dsw-alias-state-warn-primary);font-size:10.5px;font-weight:600;line-height:18px;text-align:center;flex:none}',
+			'.dc_badge,.dc_chip,.dc_dot{border-radius:999px}.dc_badge{padding:0 8px;line-height:19px}.dc_chip{padding:1px 8px;line-height:17px}',
+			'.dc_sectionTitle{font-size:13px;letter-spacing:.01em}.dc_sectionCount,.dc_fieldHint{font-size:11px}',
+			'.dc_searchRow{display:flex;align-items:center;gap:10px;margin:8px 0 4px}.dc_search{flex:1;min-width:0;border-radius:14px;padding:8px 12px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 55%,transparent)}',
+			'.dc_input,.dc_textarea{border-width:1px;border-radius:14px;background:color-mix(in srgb,var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1)) 72%,transparent);transition:border-color .16s ease,box-shadow .16s ease}.dc_input:focus,.dc_textarea:focus{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,var(--dsw-alias-border-l2));box-shadow:0 0 0 4px color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent)}',
+			'.dc_reader{padding:0 22px 18px}.dc_readerHead{padding-top:2px}.dc_tabs{padding:2px 0 8px;gap:6px}.dc_tab{border-radius:999px;padding:4px 13px}.dc_tabOn{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 30%,transparent);background:linear-gradient(135deg,color-mix(in srgb,var(--dsw-alias-brand-primary) 16%,transparent),transparent)}',
+			'.dc_turn{border-radius:16px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 58%,transparent)}.dc_turn_user{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 26%,transparent);background:linear-gradient(135deg,color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent),color-mix(in srgb,var(--dsw-alias-bg-layer-1) 55%,transparent))}.dc_turn_assistant{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 18%,transparent)}.dc_turnBody{padding:10px 14px 12px}',
+			'.dc_composer{border-radius:24px;padding:12px 14px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 72%,transparent)}.dc_sent{padding:2px 10px;border-radius:999px;background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent)}',
+			'.dc_settings{border-radius:24px;padding:16px 18px}.dc_station{border-radius:20px;padding:12px 14px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 50%,transparent)}.dc_qr{border-radius:18px;padding:8px;width:196px;height:196px;background:var(--dsw-alias-bg-base)}',
+			'.dc_scroll::-webkit-scrollbar,.dc_rail::-webkit-scrollbar,.dc_main::-webkit-scrollbar,.dc_turnBody::-webkit-scrollbar{width:10px;height:10px}.dc_scroll::-webkit-scrollbar-thumb,.dc_rail::-webkit-scrollbar-thumb,.dc_main::-webkit-scrollbar-thumb,.dc_turnBody::-webkit-scrollbar-thumb{border-radius:999px;border:3px solid transparent;background-clip:padding-box;background-color:color-mix(in srgb,var(--dsw-alias-label-caption) 34%,transparent)}.dc_scroll::-webkit-scrollbar-track,.dc_rail::-webkit-scrollbar-track,.dc_main::-webkit-scrollbar-track{background:transparent}',
+			'@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.dc_rail,.dc_memory,.dc_device,.dc_row,.dc_taskItem,.dc_command,.dc_settings,.dc_blank,.dc_notice,.dc_composer,.dc_turn,.dc_station,.dc_mobile,.dc_ghost{background:var(--dsw-alias-bg-layer-1)}}',
+			'@media (prefers-reduced-motion:reduce){.dc_row,.dc_device,.dc_devItem,.dc_taskItem,.dc_ghost,.dc_primary,.dc_tab{transition:none}.dc_ghost:hover:not(:disabled),.dc_primary:hover:not(:disabled),.dc_row:hover{transform:none}}',
+			'@media (max-width:720px){.dc_workspace{flex-direction:column;padding:0 10px 12px;gap:10px}.dc_rail{width:auto;flex-direction:row;flex-wrap:wrap;align-items:center;border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 65%,transparent)}.dc_devices{flex-direction:row;flex-wrap:wrap}.dc_main{padding:0}.dc_factValue{max-width:58vw}.dc_head{flex-wrap:wrap;padding:12px 14px 10px}}',
 		].join('');
 		//#endregion
 

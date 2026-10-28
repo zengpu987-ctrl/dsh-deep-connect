@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.5/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.1.0/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -77,7 +77,7 @@ dsh plugin --profile web add "https://github.com/zengpu987-ctrl/dsh-deep-connect
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.5/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.1.0/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -100,6 +100,26 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.0.5/in
 
 想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
 在面板里改填那条地址即可，协议与中继站完全一样。
+
+---
+
+## v4.1.0：磨砂玻璃界面 + 会话搜索 + 全功能核查
+
+界面重做（全部走主题 token，无硬编码颜色）：
+
+- **磨砂玻璃材质**：设备栏、会话行、任务卡、阅读器气泡、设置卡、输入框、命令卡统一
+  `backdrop-filter: blur() saturate()` 叠在分层渐变底色上，带内高光与柔和投影；
+  不支持模糊的环境自动退回不透明底色。
+- **圆润圆角**：设备栏 24px、卡片 20px、输入框/按钮/标签 14–999px；
+  按钮改胶囊形并加了抬起动效；滚动条改成细圆角。
+- **层次与动效**：顶部栏半透明悬浮、设备项选中用品牌色渐变、对话/轨迹页签是胶囊分段控件；
+  `prefers-reduced-motion` 下全部过渡关闭。
+- **会话搜索**：主区新增搜索框，按标题、提示词、任务正文、会话 id 过滤（本地即时，不发网络请求）；
+  设备栏每个设备多了「待办数量」小徽章，一眼看出哪台还有活。
+- **配色自适应**：浅色/深色都沿用 DSH 的 `--dsw-*` 变量，切换主题不用改插件。
+
+功能核查（本版全绿）：relay 40、station 17、e2e 116、client 112。上一轮修好的投递、插话、
+发布命令（v4.0.5）与 v4.0.4 的实时/调用行/自动重建都在回归覆盖内。
 
 ---
 
@@ -289,7 +309,7 @@ v2 把「点开才拉」变成「一出现就同步」：
 > 本机没挂载 `sessionPersistence` 的部署会直接说明无法继承。
 
 发版检查：`node tools/station-smoke.mjs` 真起一个中继站（relay 子进程 + cloudflared 隧道）并验证令牌、`proto=3` 门禁与邀请链接往返；`node tools/deep-connect-e2e.mjs` 覆盖了自动全文同步、缓存优先读取、
-继承落地等路径（103 项），`relay-smoke`（40 项）与 `client-check`（101 项）不变。
+继承落地等路径（116 项），`relay-smoke`（40 项）与 `client-check`（112 项）不变。
 
 
 ---
@@ -359,8 +379,8 @@ v2 把「点开才拉」变成「一出现就同步」：
 | 部分 | 状态 |
 |---|---|
 | 中继 `relay/relay.cjs` | ✅ 端到端验证，40 项检查（真实 WebSocket 帧、掩码、分片、长度三种编码、离线信箱与重连排空、半开连接离场、上限与淘汰、长轮询、频道隔离、令牌门、重启后落盘恢复） |
-| Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，103 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、**设备一出现就自动全文同步**、**缓存优先读取**、**继承成本机会话且事件逐条重排**、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
-| 浏览器半渲染 | ✅ 101 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
+| Host 半 + 客户端半 + 中继的联通 | ✅ 端到端验证，116 项检查：两台真实插件实例各自持有会话语料，经真实中继互通（密钥一致、索引过线、任务折叠、完整历史、**设备一出现就自动全文同步**、**缓存优先读取**、**继承成本机会话且事件逐条重排**、无法伪造未抓取的会话、接管投喂、陌生账号进不来、篡改/换收件人被拒、设置往返） |
+| 浏览器半渲染 | ✅ 112 项离线检查（把 `client.js` 当文本 eval，用桩 React 渲染面板，断言真机载荷下的输出）＋ 真机 GUI 无头 Chrome 打开面板逐项核对 |
 | `deep-connect/relay/cloudflare` | ⚠️ **未运行过**（本机 `workers.dev` 被污染且没有账号）。按官方 API 写，首次 `wrangler deploy` 才是真测试 |
 | `deep-connect/relay/deno` | ⚠️ **未运行过**。同上，协议与 `relay.cjs` 一致 |
 
@@ -369,8 +389,8 @@ v2 把「点开才拉」变成「一出现就同步」：
 ```bash
 node tools/relay-smoke.mjs        # 中继（40 项）
 node tools/station-smoke.mjs      # 一键中继站：真起 relay + cloudflared + 接续（17 项）
-node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（103 项）
-node tools/client-check.mjs       # 浏览器半（101 项）
+node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（116 项）
+node tools/client-check.mjs       # 浏览器半（112 项）
 node ../tools/browser/check-connect.mjs   # 真机 GUI：面板真的渲染出来（需 GUI 在 19387 运行）
 ```
 

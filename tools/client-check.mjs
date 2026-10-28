@@ -430,6 +430,15 @@ const taskHtml = first.html;
 check('renders the actual task content, not just counts', taskHtml.includes('把面板写出来') && taskHtml.includes('B 机上的团队任务'));
 check('task rows offer hand-off for remote work', taskHtml.includes('接力到本机'));
 
+/* ------------------------------------------- 4d. search + device task badge */
+check('the rail shows an open-task badge', first.html.includes('dc_devBadge'));
+const searchInput = find(first.tree, (node) => node.type === 'input' && node.props?.['aria-label'] === '搜索会话、任务或提示词…');
+check('the workspace has a session search box', searchInput !== null);
+searchInput?.props?.onChange({ target: { value: '把面板写出来' } });
+await settle();
+const filteredHtml = serialize(first.renderer.render());
+check('search narrows the list to matching sessions', filteredHtml.includes(LOCAL_SESSION.title) && !filteredHtml.includes(REMOTE_SESSION.title), filteredHtml.slice(0, 160));
+
 /* ---------------------------------------------------------------- 5. reader */
 const rowClicked = (() => {
   let done = false;
