@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.2.0/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.3.0/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -77,7 +77,7 @@ dsh plugin --profile web add "https://github.com/zengpu987-ctrl/dsh-deep-connect
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.2.0/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.3.0/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -100,6 +100,22 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.2.0/in
 
 想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
 在面板里改填那条地址即可，协议与中继站完全一样。
+
+---
+
+## v4.3.0：星球主题
+
+Deep Connect 面板换成深空蓝紫的星球主题：
+
+- **星空底**：两层视差星点（径向渐变，不依赖图片/画布），缓慢闪烁。
+- **星云与行星**：右上大行星带环、左下小行星、右下迷你行星，各自按不同周期漂浮；
+  所有颜色仍取自 `--dsw-*` 主题 token，浅色/深色跟随应用。
+- **不挡操作**：整层 `pointer-events:none`、`aria-hidden="true"`，设备栏、会话、按钮完全可点。
+- **减弱动态**：`prefers-reduced-motion` 下所有漂浮与闪烁停止。
+
+配套的 DSH 开机动画是独立插件，见工作区 `dsh-cosmos-launch`（安装到 profile 后生效）：
+启动时星点从中心爆开、星云成形、行星落位，约 4.2 秒后自动进入界面；右下角可「跳过」，
+设置里可关闭或立即重播，减弱动态时缩短为不到 1 秒。
 
 ---
 
