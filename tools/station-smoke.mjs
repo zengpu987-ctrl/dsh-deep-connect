@@ -120,6 +120,24 @@ try {
   }
   check(stopped === false, 'stopping the adopted station really stops it');
 
+  section('the watchdog restarts the relay in place');
+  const wdRoot = join(dir, 'watchdog');
+  const wd = new RelayStation({ root: wdRoot, log: () => {} });
+  const wdInfo = await wd.start({ preferPublic: false });
+  const wdPort = wd.port;
+  try {
+    process.kill(wd.relayPid, 'SIGTERM');
+  } catch {
+    /* already gone */
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  const revived = await wd.ensureRelay();
+  check(revived === true, 'ensureRelay brings a dead relay back');
+  check(wd.port === wdPort && wd.token === wdInfo.token, 'the same port and invite token are kept');
+  const wdHealth = await fetch(`http://127.0.0.1:${wdPort}/healthz`).then((r) => r.ok).catch(() => false);
+  check(wdHealth === true, 'the relay answers on the original port again');
+  await wd.stop();
+
   console.log(`\nlan address: ${lanAddress() ?? '(none)'}`);
 } catch (error) {
   failures.push(`unexpected failure: ${error instanceof Error ? error.stack : String(error)}`);

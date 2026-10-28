@@ -586,6 +586,10 @@ try {
   check(!(await fetch(localMobile.replace(/\/m\/[^/]+\//, '/m/wrong-token/'))).ok, 'a wrong token is refused');
   const mobileList = await (await fetch(`${localMobile}api?view=1`)).json();
   check(Array.isArray(mobileList.devices) && mobileList.devices.length >= 2, 'the phone lists both devices');
+  await until(async () => {
+    const value = await apiA.command({ action: 'list' });
+    return value.self.connected === true && value.peers.some((peer) => peer.online === true) ? value : undefined;
+  }, { timeoutMs: 15_000, what: 'A to reconnect before the phone command' });
   const mobileTask = await (await fetch(`${localMobile}api`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

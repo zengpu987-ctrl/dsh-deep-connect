@@ -183,6 +183,13 @@ export async function adoptStation({ root, log = () => {} }) {
   station.public = record.public === true;
   station.relayPid = Number(record.relayPid ?? 0);
   station.tunnelPid = Number(record.tunnelPid ?? 0);
+  station.port = Number(record.port ?? 0) || (() => {
+    try {
+      return Number(new URL(record.localUrl).port);
+    } catch {
+      return 0;
+    }
+  })();
   station.startedAt = Number(record.startedAt ?? Date.now());
   log('info', `已接续上次的中继站：${station.baseUrl}`);
   return station;
@@ -262,6 +269,9 @@ export class RelayStation {
     this.relayPid = 0;
     this.tunnelPid = 0;
     this.adopted = false;
+    /** The port and token are stable across a watchdog restart, so the link survives. */
+    this.port = 0;
+    this.statePath = '';
   }
 
   /** The panel's read-only view of this station. */
@@ -278,20 +288,10 @@ export class RelayStation {
     };
   }
 
-  /**
-   * Start the relay and, when cloudflared exists, a public tunnel in front of it.
-   * @param {{ preferPublic?: boolean }} [options] - disable the tunnel to force LAN.
-   * @returns {Promise<{baseUrl: string, token: string, public: boolean, lanUrl: string, error: string}>}
-   */
-  async start(options = {}) {
-    await this.stop();
-    this.error = '';
-    const port = await freePort();
-    const token = newInviteToken();
+  /** Spawn the relay process for one port/token; shared by start and the watchdog. */
+  #spawnRelay(port, token) {
     const statePath = join(this.root, 'station', 'relay-state.json');
-    // Detached on purpose: the station must outlive this Harness process, or a
-    // plugin update would drop every peer mid-session. It is re-adopted on the
-    // next start from station.json.
+    this.statePath = statePath;
     this.relay = spawn(process.execPath, [
       RELAY_PATH,
       '--host', '0.0.0.0',
@@ -302,10 +302,82 @@ export class RelayStation {
       '--require-version', MIN_VERSION,
     ], { detached: true, stdio: 'ignore' });
     this.relayPid = this.relay.pid ?? 0;
+    this.port = port;
+    this.token = token;
     this.relay.unref();
     this.relay.on('exit', (code) => {
       if (this.relay !== undefined) this.log('warn', `中继站进程退出（code ${code}）`);
     });
+  }
+
+  /** Is a pid still running? */
+  #pidAlive(pid) {
+    if (!Number.isFinite(pid) || pid <= 0) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Keep the station's relay alive on the SAME port with the SAME token.
+   *
+   * This is what makes "加入以后就不会退出" hold on the hosting side: if the
+   * relay child crashes or is killed, the tunnel (and every invitation link
+   * pointing at it) still resolves, so the watchdog restarts the relay
+   * underneath the same address instead of asking everyone to re-join.
+   *
+   * @returns {Promise<boolean>} whether a healthy relay is listening now.
+   */
+  async ensureRelay() {
+    if (this.port <= 0 || this.token === '') return false;
+    const healthy = async () => {
+      try {
+        const response = await fetch(`http://127.0.0.1:${this.port}/healthz`, { signal: AbortSignal.timeout(3_000) });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    };
+    if ((await healthy()) && (this.relayPid === 0 || this.#pidAlive(this.relayPid))) return true;
+    if (this.relayPid > 0 && this.#pidAlive(this.relayPid)) {
+      // The pid lives but does not answer: give it a moment, then replace it.
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (await healthy()) return true;
+      try {
+        process.kill(this.relayPid, 'SIGTERM');
+      } catch {
+        /* already gone */
+      }
+    }
+    this.log('warn', `中继站无响应，正在同一端口 ${this.port} 上重启（邀请链接不变）`);
+    this.#spawnRelay(this.port, this.token);
+    if (!(await waitForRelay(`http://127.0.0.1:${this.port}`, 10_000))) {
+      this.error = '中继站无法恢复：端口可能被占用';
+      this.log('warn', this.error);
+      return false;
+    }
+    this.error = '';
+    await this.#persist().catch(() => undefined);
+    return true;
+  }
+
+  /**
+   * Start the relay and, when cloudflared exists, a public tunnel in front of it.
+   * @param {{ preferPublic?: boolean }} [options] - disable the tunnel to force LAN.
+   * @returns {Promise<{baseUrl: string, token: string, public: boolean, lanUrl: string, error: string}>}
+   */
+  async start(options = {}) {
+    await this.stop();
+    this.error = '';
+    const port = await freePort();
+    const token = newInviteToken();
+    // Detached on purpose: the station must outlive this Harness process, or a
+    // plugin update would drop every peer mid-session. It is re-adopted on the
+    // next start from station.json.
+    this.#spawnRelay(port, token);
 
     const loopback = `http://127.0.0.1:${port}`;
     if (!(await waitForRelay(loopback, 10_000))) {
@@ -394,6 +466,7 @@ export class RelayStation {
         version: 1,
         baseUrl: this.baseUrl,
         localUrl: this.localUrl,
+        port: this.port,
         token: this.token,
         public: this.public === true,
         lanUrl: this.lanUrl,
@@ -444,5 +517,6 @@ export class RelayStation {
     this.public = false;
     this.lanUrl = '';
     this.startedAt = 0;
+    this.port = 0;
   }
 }

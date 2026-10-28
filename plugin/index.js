@@ -130,6 +130,8 @@ export function apply(ctx, config) {
 
   const store = new DeepConnectStore(root, { log, defaultName: settings.deviceName });
   const sessions = new SessionAdapter(ctx, { log });
+  /** When the joined station first looked down, for the reconnect nudge. */
+  let joinDownSince = 0;
 
   /** In-memory runtime state; nothing here is secret enough to need encryption at rest beyond the key itself. */
   const state = {
@@ -1783,6 +1785,28 @@ export function apply(ctx, config) {
       ctx.interval(() => {
         void checkUpdate(false).catch(() => undefined);
       }, 30 * 60_000);
+      // Stability loop: keep the hosted relay alive in place, and pull a joined
+      // machine out of the exponential backoff if the link has been down a while.
+      ctx.interval(() => {
+        void (async () => {
+          if (settings.stationRole === 'host' && state.station !== undefined) {
+            const ok = await state.station.ensureRelay().catch(() => false);
+            if (!ok) state.stationError = '中继站无响应，正在同一端口重试…';
+            else if (typeof state.stationError === 'string' && state.stationError.includes('重试')) state.stationError = '';
+          }
+          if (settings.stationRole === 'join' && state.relay !== undefined) {
+            if (state.relay.connected === true) {
+              joinDownSince = 0;
+            } else if (joinDownSince === 0) {
+              joinDownSince = Date.now();
+            } else if (Date.now() - joinDownSince > 90_000) {
+              log('info', '已断开超过 90 秒，强制重连一次中继站');
+              state.relay.nudge();
+              joinDownSince = Date.now();
+            }
+          }
+        })();
+      }, 20_000);
       if (settings.mobileEnabled) {
         setTimeout(() => {
           void enableMobile().catch((error) => log('warn', `手机管理页启动失败：${error instanceof Error ? error.message : String(error)}`));

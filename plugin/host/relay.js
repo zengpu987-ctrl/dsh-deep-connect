@@ -80,6 +80,8 @@ export class RelayClient {
     this.pending = new Map();
     this.seen = new Set();
     this.backoff = BACKOFF_MIN_MS;
+    /** Last time a socket opened; the Host watchdog uses it to detect a stuck join. */
+    this.lastConnectedAt = 0;
     this.retryTimer = undefined;
     this.pollerAbort = new AbortController();
     this.closed = false;
@@ -168,6 +170,23 @@ export class RelayClient {
   }
 
   /** Drop the current socket and start over with fresh settings. */
+  /**
+   * Escape a stuck reconnect loop without waiting out the 60 s backoff.
+   * The Host calls this when a joined station has been down for a while.
+   * @returns {boolean} whether a reconnect attempt was started.
+   */
+  nudge() {
+    if (this.closed === true || this.connected === true) return false;
+    if (this.retryTimer !== undefined) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+    }
+    this.backoff = BACKOFF_MIN_MS;
+    this.#setState('connecting', '正在重新连接中继站…');
+    this.#connect();
+    return true;
+  }
+
   restart({ relayUrl, token, secret, key, deviceName } = {}) {
     this.stop();
     if (relayUrl !== undefined) this.relayUrl = String(relayUrl);
@@ -233,6 +252,8 @@ export class RelayClient {
     socket.addEventListener('open', () => {
       this.connected = true;
       this.backoff = BACKOFF_MIN_MS;
+    /** Last time a socket opened; the Host watchdog uses it to detect a stuck join. */
+    this.lastConnectedAt = 0;
       this.lastConnectedAt = Date.now();
       this.lastError = '';
       this.#setState('connected', '');

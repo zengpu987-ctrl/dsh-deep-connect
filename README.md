@@ -42,7 +42,7 @@
 首选（jsDelivr CDN，国内实测可达）：
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.1.0/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.2.0/install.sh | bash
 ```
 
 备选（任选其一，都是同一个脚本）：
@@ -77,7 +77,7 @@ dsh plugin --profile web add "https://github.com/zengpu987-ctrl/dsh-deep-connect
 
 ```bash
 # 注意：变量要放在 bash 前面（管道左侧只作用于 curl），或者先 export。
-curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.1.0/install.sh \
+curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.2.0/install.sh \
   | RELAY_URL=http://172.20.10.12:8790 bash
 ```
 
@@ -100,6 +100,33 @@ curl -fsSL https://cdn.jsdelivr.net/gh/zengpu987-ctrl/dsh-deep-connect@v4.1.0/in
 
 想自己托管一个常开中继（VPS / 局域网服务器）仍然可以，见 [relay/DEPLOY.md](relay/DEPLOY.md)；
 在面板里改填那条地址即可，协议与中继站完全一样。
+
+---
+
+## v4.2.0：互联更稳、加入后不再掉出、界面更灵动
+
+稳定性（这轮主要工作）：
+
+- **中继站看护（watchdog）**：主持人每 20 秒检查本机中继；进程崩了/被杀了，就**在同一端口、用同一个邀请令牌**原地重启。
+  隧道指向的端口没变，所以**邀请链接对其它设备仍然有效**，不需要重新加入。日志里会看到
+  「同一端口重启（邀请链接不变）」。
+- **加入方永不自动退出**：成员关系只由「退出中继站」清除。链路断了会一直重试；
+  如果断开超过 90 秒，Host 会主动 `nudge()` 一次，跳过 60 秒的指数退避，立刻重连。
+- **成员持久化**：加入方的地址/令牌/角色写进配置，插件更新、DSH 重启自动重连；
+  主持人重启时先尝试接续 detach 进程，接不上就自动重建（v4.0.4 起）。
+- 顺带修了 e2e 里手机下发命令的偶发失败：测试在切换记忆共享后会等 A 重新连上再下发，
+  不再靠运气；这也验证了「切换设置引起的短暂断线会自动恢复」。
+
+界面（灵动版）：
+
+- **流动色场**：两层模糊光斑在背景里缓慢漂移（20s 往返），像极光一样铺在磨砂玻璃下面。
+- **入场节奏**：会话行、设备项、任务卡、阅读器气泡逐条上浮淡入（35ms 递进）。
+- **呼吸在线灯**：已连接的绿点带柔和的呼吸光环。
+- **弹性控件**：页签、开关用回弹曲线；按钮按下缩到 97%；设备项悬停右移 2px。
+- **输入聚焦光晕**：编辑器聚焦时边框与光晕一起亮起。
+- 全部动画在 `prefers-reduced-motion` 下关闭；颜色仍只来自主题 token。
+
+测试：relay 40、station **20**（新增看护重启：杀进程后同端口同令牌恢复）、e2e 116、client 112。
 
 ---
 
@@ -388,7 +415,7 @@ v2 把「点开才拉」变成「一出现就同步」：
 
 ```bash
 node tools/relay-smoke.mjs        # 中继（40 项）
-node tools/station-smoke.mjs      # 一键中继站：真起 relay + cloudflared + 接续（17 项）
+node tools/station-smoke.mjs      # 一键中继站：真起 relay + cloudflared + 接续 + 看护（20 项）
 node tools/deep-connect-e2e.mjs   # 两台机器 + 中继（116 项）
 node tools/client-check.mjs       # 浏览器半（112 项）
 node ../tools/browser/check-connect.mjs   # 真机 GUI：面板真的渲染出来（需 GUI 在 19387 运行）
